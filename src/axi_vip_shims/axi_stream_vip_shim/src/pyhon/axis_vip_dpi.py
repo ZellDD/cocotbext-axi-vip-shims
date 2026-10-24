@@ -30,7 +30,7 @@ import os
 from collections import namedtuple
 from ctypes import POINTER, byref, c_char_p, c_int, c_void_p
 
-from cocotb.triggers import Edge
+from cocotb.triggers import ReadOnly, ReadWrite, Timer
 
 MAX_TDATA_BITS = 4096          # = AXIS_VEC_BITS in axis_vip_dpi.sv
 _BP_MODES = {"none": 0, "osc": 1, "random": 2, "stall": 3}   # = axis_dpi.c
@@ -168,6 +168,15 @@ class _AxisVip:
                 + "; ".join(diffs))
         self._verified = True
 
+    async def _status_change(self):
+        """Wait for the shim's status signal to change.
+
+        Then leave its value-change callback before going on: on Questa a
+        value-change wait re-armed from inside the callback is never woken.
+        """
+        await self._status.value_change
+        await ReadWrite()
+
     def check(self):
         """Verify the constructor against the SV shim now (raises on mismatch)."""
         self._verify()
@@ -270,8 +279,16 @@ class AXIS_MASTER_VIP(_AxisVip):
         """Wait until the VIP has put everything queued so far on the bus.
         Do not use while the sink is stalled."""
         self._verify()
+        # `outstanding` is updated in the NBA region: let a put_transaction()
+        # from this same time step show up first.
+        await ReadOnly()
+        if self.outstanding == 0:
+            # Don't hand ReadOnly back to the caller: it could not drive
+            # signals or call into the shims, nor wait_idle() again.
+            await Timer(1, "step")
+            return
         while self.outstanding > 0:
-            await Edge(self._status)
+            await self._status_change()             # ends outside ReadOnly
 
 
 # --------------------------------------------------------------------- slave
@@ -351,4 +368,4 @@ class AXIS_SLAVE_VIP(_AxisVip):
             t = self.try_get_transaction()
             if t is not None:
                 return t
-            await Edge(self._status)
+            await self._status_change()

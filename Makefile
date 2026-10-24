@@ -2,14 +2,15 @@
 #
 #   make          build the DPI-C libraries into lib/
 #   make test     build, then run the simulator-free tests
-#   make clean    empty build/ and lib/ (keeping .gitkeep) and remove Python caches
+#   make clean    empty build/, lib/ and test artifacts (keeping .gitkeep),
+#                 remove Python caches
 
 BUILD_DIR := build
 
 .PHONY: all test clean
 
 all:
-	cmake -S src -B $(BUILD_DIR)
+	cmake -B $(BUILD_DIR)
 	cmake --build $(BUILD_DIR)
 
 test: all
@@ -20,3 +21,4 @@ clean:
 	find . \( -path ./.venv -o -path ./.git \) -prune -o \
 	       -name __pycache__ -type d -prune -exec rm -rf {} +
 	rm -rf .pytest_cache
+	find test -path '*/artifacts/*' -type f ! -name .gitkeep -delete

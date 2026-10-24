@@ -5,7 +5,7 @@ which plays the simulator and the SV shims (per-instance queues behind the
 exported functions, and a svSetScope that must have selected the right
 instance). Build it first, then run:
 
-    cmake -S src -B build && cmake --build build      (from the repo root)
+    cmake -B build && cmake --build build      (from the repo root)
     python3 test_c_side.py        (needs cocotb importable, no simulator)
 
 This checks the C trampoline, scope handling, vector packing and the Python
@@ -27,7 +27,7 @@ LIB = os.environ.get("AXIS_DPI_TEST_LIB",
                      os.path.join(REPO, "lib", "libaxis_dpi_test.so"))
 if not os.path.isfile(LIB):
     raise SystemExit(f"{LIB} not found -- build it with "
-                     "'cmake -S src -B build && cmake --build build'")
+                     "'cmake -B build && cmake --build build'")
 
 from axis_vip_dpi import AXIS_MASTER_VIP, AXIS_SLAVE_VIP, load_lib  # noqa: E402
 

@@ -21,6 +21,10 @@ build/*
 lib/*
 !lib/.gitkeep
 
+# Test artifacts: logs and Questa waveforms (keep the placeholders)
+test/**/artifacts/*/*
+!test/**/artifacts/*/.gitkeep
+
 # =============================================================================
 # CMake
 # =============================================================================

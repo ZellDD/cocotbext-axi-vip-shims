@@ -18,6 +18,10 @@
 //
 // cocotb learns about changes through two status signals the shims drive
 // (never written by cocotb): `outstanding` (master) and `rx_count` (slave).
+// They are written with NONBLOCKING assignments on purpose: cocotb resumes
+// coroutines from the value-change callback, and a coroutine that calls back
+// into a shim (DPI export) must not run in the middle of a shim process or of
+// another export call. In the NBA region neither is running.
 //
 // Every call into the Xilinx VIP API sits in a task whose name starts with
 // vip_ so it is easy to adjust per Vivado version (PG277).
@@ -121,14 +125,14 @@ module axis_vip_dpi_mst #(
     b.delay = delay;
     tx_q.push_back(b);
     pushed++;
-    outstanding = pushed - done;
+    outstanding <= pushed - done;
     return 0;
   endfunction
 
   function int axis_mst_flush();
     pushed -= tx_q.size();
     tx_q.delete();
-    outstanding = pushed - done;
+    outstanding <= pushed - done;
     return 0;
   endfunction
 
@@ -147,8 +151,14 @@ module axis_vip_dpi_mst #(
     agent.driver.send(t);               // queued in the VIP, returns at once
   endtask
 
+  // The AXI4-Stream driver has no blocking "wait idle"; poll is_driver_idle()
+  // until it holds for two cycles (it can flicker between queued transfers).
   task automatic vip_wait_idle();
-    agent.wait_drivers_idle();
+    int quiet = 0;
+    while (quiet < 2) begin
+      @(posedge aclk);
+      quiet = agent.driver.is_driver_idle() ? quiet + 1 : 0;
+    end
   endtask
   // -----------------------------------------
 
@@ -173,7 +183,7 @@ module axis_vip_dpi_mst #(
       repeat (2) @(posedge aclk);       // let the driver pick the beats up
       vip_wait_idle();
       done = snap;
-      outstanding = pushed - done;
+      outstanding <= pushed - done;
     end
   endtask
 
@@ -209,10 +219,11 @@ module axis_vip_dpi_slv #(
   parameter int    ID_W       = 0,
   parameter int    DEST_W     = 0,
   parameter int    USER_W     = 0,
-  // 1: stop/start the slave agent before applying a new TREADY pattern. Use if
-  //    your VIP queues new patterns behind the running one instead of
-  //    replacing it (check on first run).
-  parameter bit    HARD_RESTART_ON_BP = 1'b0,
+  // 1: restart the slave driver for every new TREADY pattern, so it replaces
+  //    the running one at once. The VIP otherwise queues it behind the
+  //    running one: it starts after the current low+high period, after the
+  //    next handshake for "none", and never after a stall.
+  parameter bit    HARD_RESTART_ON_BP = 1'b1,
   parameter int    STALL_CYCLES       = 1 << 30
 );
   import axi4stream_vip_pkg::*;
@@ -269,7 +280,7 @@ module axis_vip_dpi_slv #(
     last = int'(b.last);
     id   = b.id;
     dest = b.dest;
-    rx_count = rx_q.size();
+    rx_count <= rx_q.size();
     return 1;
   endfunction
 
@@ -284,12 +295,13 @@ module axis_vip_dpi_slv #(
 
   function int axis_slv_flush();
     rx_q.delete();
-    rx_count = 0;
+    rx_count <= 0;
     return 0;
   endfunction
 
   // ---------------- VIP API ----------------
-  task automatic vip_apply_bp(input int mode, input int low_min, input int low_max,
+  task automatic vip_apply_bp(input bit restart,
+                              input int mode, input int low_min, input int low_max,
                               input int high_min, input int high_max);
     axi4stream_ready_gen rg;
     rg = agent.driver.create_ready("dpi_bp");
@@ -313,30 +325,37 @@ module axis_vip_dpi_slv #(
         rg.set_ready_policy(XIL_AXI4STREAM_READY_GEN_NO_BACKPRESSURE);
       end
     endcase
-    if (HARD_RESTART_ON_BP) begin
-      agent.stop_slave();
-      agent.start_slave();
+    if (restart) begin
+      // Driver only: agent.start_slave() would start a second monitor.
+      agent.driver.stop_phase();
+      while (agent.driver.get_is_active()) agent.vif_proxy.wait_posedge_aclk();
+      fork agent.driver.run_phase(); join_none
+      // send_tready() needs an active driver; run_phase() sets that first thing
+      while (!agent.driver.get_is_active()) #0;
     end
     agent.driver.send_tready(rg);
+    // The driver's pattern queue cannot be cleared from here: let it take rg
+    // off the queue before the next change, so no stale pattern is left.
+    if (restart) agent.vif_proxy.wait_aclks(3);
   endtask
 
   // Signals that do not exist in this interface come back as 0.
   task automatic vip_get_beat(output beat_t b);
     axi4stream_monitor_transaction mt;
     xil_axi4stream_data_beat d;
-    xil_axi4stream_keep_beat k;
+    xil_axi4stream_strb_beat k;          // the VIP types TKEEP like TSTRB
     xil_axi4stream_strb_beat s;
     xil_axi4stream_user_beat u;
     agent.monitor.item_collected_port.get(mt);
     b = '{default: '0};
-    mt.get_data_beat(d);
+    d = mt.get_data_beat();
     b.data = d[DATA_BYTES*8-1:0];
-    if (HAS_TKEEP) begin mt.get_keep_beat(k); b.keep = k[DATA_BYTES-1:0]; end
-    if (HAS_TSTRB) begin mt.get_strb_beat(s); b.strb = s[DATA_BYTES-1:0]; end
+    if (HAS_TKEEP) begin k = mt.get_keep_beat(); b.keep = k[DATA_BYTES-1:0]; end
+    if (HAS_TSTRB) begin s = mt.get_strb_beat(); b.strb = s[DATA_BYTES-1:0]; end
     if (HAS_TLAST) b.last = mt.get_last();
     if (ID_W   > 0) b.id   = int'(mt.get_id());
     if (DEST_W > 0) b.dest = int'(mt.get_dest());
-    if (USER_W > 0) begin mt.get_user_beat(u); b.user = u[UW-1:0]; end
+    if (USER_W > 0) begin u = mt.get_user_beat(); b.user = u[UW-1:0]; end
   endtask
   // -----------------------------------------
 
@@ -347,7 +366,8 @@ module axis_vip_dpi_slv #(
     forever begin
       wait (bp_version != seen);
       seen = bp_version;
-      vip_apply_bp(bp_mode, bp_low_min, bp_low_max, bp_high_min, bp_high_max);
+      vip_apply_bp(HARD_RESTART_ON_BP && seen > 0, bp_mode, bp_low_min, bp_low_max,
+                   bp_high_min, bp_high_max);
     end
   endtask
 
@@ -356,7 +376,7 @@ module axis_vip_dpi_slv #(
     forever begin
       vip_get_beat(b);
       rx_q.push_back(b);
-      rx_count = rx_q.size();
+      rx_count <= rx_q.size();
     end
   endtask
 

@@ -1,6 +1,6 @@
 # axi_vip_shims -- DPI-C libraries for the cocotb <-> Xilinx VIP shims
 #
-#   cmake -S src -B build      (from the repo root)
+#   cmake -B build      (from the repo root)
 #   cmake --build build
 #
 # Libraries land in lib/ (AXI_VIP_SHIMS_LIB_DIR). Point the simulator's

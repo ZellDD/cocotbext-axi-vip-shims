@@ -63,15 +63,18 @@ lib/                             built shared libraries
 ## Requirements
 
 - Vivado with the AXI4-Stream VIP. You need a master and a slave VIP
-  customised for your interface.
-- A simulator that supports DPI-C and that cocotb can drive.
+  customised for your interface. For the test bench,
+  [gen_vip.tcl](test/axi_vip_shims/axi_stream_vip_shims/hdl/gen_vip.tcl)
+  generates them in Vivado batch mode.
+- A simulator that supports DPI-C and that cocotb can drive. Tested with
+  Questa Altera Starter FPGA Edition 2025.2 (see [Questa notes](#questa-notes)).
 - Python 3 and cocotb.
 - A C99 compiler and CMake ≥ 3.16.
 
 ## Building the DPI library
 
 ```sh
-cmake -S src -B build
+cmake -B build
 cmake --build build
 ```
 
@@ -96,12 +99,12 @@ The shim parameters must match the VIP customisation:
 
 ```systemverilog
 axis_vip_dpi_mst #(.NAME("mst0"), .DATA_BYTES(4),
-                   .HAS_TKEEP(1), .HAS_TSTRB(0), .HAS_TLAST(1),
+                   .HAS_TKEEP(1), .HAS_TSTRB(1), .HAS_TLAST(1),
                    .ID_W(4), .DEST_W(4), .USER_W(4))
                    mst_shim (.aclk(aclk));
 
 axis_vip_dpi_slv #(.NAME("slv0"), .DATA_BYTES(4),
-                   .HAS_TKEEP(1), .HAS_TSTRB(0), .HAS_TLAST(1),
+                   .HAS_TKEEP(1), .HAS_TSTRB(1), .HAS_TLAST(1),
                    .ID_W(4), .DEST_W(4), .USER_W(4))
                    slv_shim ();
 ```
@@ -121,9 +124,11 @@ override them at compile time to match your component and instance names:
 
 Slave-only parameters:
 
-- `HARD_RESTART_ON_BP`: stops and restarts the agent before applying a new
-  TREADY pattern. Use it if your VIP version queues patterns instead of
-  replacing them.
+- `HARD_RESTART_ON_BP` (default 1): restarts the slave driver for every new
+  TREADY pattern, so the pattern takes effect at once. Without it, the VIP
+  queues the new pattern behind the running one. It then starts only after the
+  current low/high period, after the next handshake for `"none"`, and never
+  after a `"stall"`.
 - `STALL_CYCLES`: the low time used for `"stall"`.
 
 ### 2. Load the library in both places
@@ -139,14 +144,14 @@ Slave-only parameters:
 from cocotb.triggers import with_timeout
 from axis_vip_dpi import AXIS_MASTER_VIP, AXIS_SLAVE_VIP
 
-IFACE = dict(tdata_width=32, has_tkeep=True, has_tlast=True,
+IFACE = dict(tdata_width=32, has_tkeep=True, has_tstrb=True, has_tlast=True,
              tid_width=4, tdest_width=4, tuser_width=4)
 
 mst = AXIS_MASTER_VIP("mst0", dut.mst_shim, **IFACE)   # name == shim NAME
 slv = AXIS_SLAVE_VIP("slv0", dut.slv_shim, **IFACE)
 
 mst.put_transaction(tdata=0x11111111, tlast=False, tid=2)
-mst.put_transaction(tdata=0x22222222, tlast=True, tkeep=0b0011)
+mst.put_transaction(tdata=0x22222222, tlast=True, tkeep=0b0011, tstrb=0b0011)
 
 slv.set_backpressure("random", low=(0, 8), high=(1, 4))
 t = await with_timeout(slv.get_transaction(), 100, "us")
@@ -189,6 +194,11 @@ field. You can call `check()` to run that check early.
 Signals that the interface doesn't have come back as `None`. There is no
 built-in timeout; wrap waits in `cocotb.triggers.with_timeout()`.
 
+The VIP drives noise on null bytes (TKEEP=0) and position bytes (TSTRB=0), as
+AXI4-Stream allows. Compare only data bytes (TKEEP=1 and TSTRB=1). If you pass
+`tkeep` without `tstrb`, TSTRB defaults to all ones, which is not allowed where
+TKEEP=0. Pass both.
+
 ## Tests
 
 - **Simulator-free** ([test_c_side.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_c_side.py)):
@@ -198,7 +208,7 @@ built-in timeout; wrap waits in `cocotb.triggers.with_timeout()`.
   needs cocotb importable, but no simulator.
 
   ```sh
-  cmake -S src -B build && cmake --build build
+  cmake -B build && cmake --build build
   pytest      # from the repo root
   ```
 
@@ -206,4 +216,69 @@ built-in timeout; wrap waits in `cocotb.triggers.with_timeout()`.
   runs against [tb_top.sv](test/axi_vip_shims/axi_stream_vip_shims/hdl/tb_top.sv),
   a VIP master → VIP slave loopback. It covers round-trips of every signal,
   packets, runtime backpressure changes, stall/release, and constructor
-  mismatch detection.
+  mismatch detection. It is started by
+  [test_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_runner.py),
+  which generates the VIP cores into `build/ip/` on first run:
+
+  ```sh
+  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_runner.py
+  ```
+
+  It finds Vivado through `XILINX_VIVADO` or `vivado` on `PATH`. Each cocotb
+  test runs in its own `vsim`. It writes its log to
+  `test/axi_vip_shims/axi_stream_vip_shims/artifacts/logs/<test>.log` and
+  records all signals to `.../artifacts/wlf/<test>.wlf`. The build log is
+  `artifacts/logs/build.log`. Open a waveform with
+  `vsim -view <path>/artifacts/wlf/test_beats_and_backpressure.wlf`. Set `WAVES=0` to
+  skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
+  test. `./install.sh` builds everything and runs both test sets.
+
+### Using your own VIP sources
+
+Without Vivado, or with a different Vivado version, pass the VIP sources
+yourself:
+
+```sh
+./install.sh --vip-src /path/to/vip_sources      # a directory ...
+./install.sh --vip-src /path/to/vip.f            # ... or a file list
+```
+
+For the runner on its own, set `AXIS_VIP_SRC` to the same path. Vivado is then
+not used at all.
+
+- **A directory** must contain the Xilinx VIP packages and interfaces
+  (`xil_common_vip_pkg.sv`, `axi4stream_vip_pkg.sv`, `axi4stream_vip_if.sv`,
+  ...), the `axi4stream_vip_*_vl_rfs.sv` top, and the generated
+  `axi4stream_vip_mst` / `axi4stream_vip_slv` (`.sv` and `_pkg.sv`). It is
+  searched recursively and the compile order is worked out for you. Duplicates
+  and `_stub.sv` files are skipped, and folders with `.svh` files become
+  include dirs.
+- **A `.f` file** is compiled exactly in the order given. Use one path per
+  line, relative to the `.f` file or absolute, with `$VARS` allowed. Add
+  `+incdir+<dir>` lines for include folders, and `//` or `#` for comments.
+
+The generated cores must match `tb_top.sv` (4-byte TDATA, TKEEP, TSTRB, TLAST,
+and 4-bit TID/TDEST/TUSER).
+
+**Older versions:** the AXI4-Stream VIP exists only in Vivado (since about
+2017), so there is nothing to use from ISE. Older Vivado releases may name
+VIP API calls differently. The shim keeps every VIP call in a `vip_*` task in
+[axis_vip_dpi.sv](src/axi_vip_shims/axi_stream_vip_shim/src/hdl/axis_vip_dpi.sv)
+so they can be adapted. Only Vivado 2025.2 has been tested.
+
+## Questa notes
+
+The runner sets three things that the shims need on Questa:
+
+- `+define+XIL_DO_NOT_USE_ADV_RANDOMIZATION`: the VIP uses `$urandom` instead
+  of `randomize()` / `randcase`. Those need a SystemVerilog verification
+  licence, which the Starter edition doesn't have.
+- `-dpioutoftheblue 1`: cocotb calls the shims' DPI exports from VPI callbacks,
+  not from inside an SV import call chain.
+- `-voptargs=+acc`: keeps the shims' status signals visible to cocotb.
+
+The shims drive their status signals (`outstanding`, `rx_count`) with
+nonblocking assignments, so cocotb never wakes up in the middle of a shim
+process or of a DPI call. The Python side also leaves each status-signal
+callback (through `ReadWrite`) before waiting again. On Questa, a value-change
+wait re-armed from inside its own callback is never woken.
