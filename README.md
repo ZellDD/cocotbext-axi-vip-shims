@@ -68,6 +68,9 @@ lib/                             built shared libraries
   generates them in Vivado batch mode.
 - A simulator that supports DPI-C and that cocotb can drive. Tested with
   Questa Altera Starter FPGA Edition 2025.2 (see [Questa notes](#questa-notes)).
+  The simulator must handle the Xilinx VIP's SystemVerilog classes, so GHDL
+  (VHDL only) and Verilator don't work (see
+  [Other simulators](#other-simulators)).
 - Python 3 and cocotb.
 - A C99 compiler and CMake ≥ 3.16.
 
@@ -282,3 +285,24 @@ nonblocking assignments, so cocotb never wakes up in the middle of a shim
 process or of a DPI call. The Python side also leaves each status-signal
 callback (through `ReadWrite`) before waiting again. On Questa, a value-change
 wait re-armed from inside its own callback is never woken.
+
+## Other simulators
+
+- **GHDL** simulates VHDL only. The Xilinx VIP and the shims are
+  SystemVerilog, and the C side is reached through SystemVerilog DPI-C.
+- **Verilator** (tried with 5.032) can't build the test bench:
+  - The VIP's protocol checker (`axi4stream_vip_axi4streampc`) is written in
+    SVA with `##[m:n]` sequences, which Verilator doesn't support. The VIP
+    interface instantiates the checker unconditionally.
+  - The VIP package calls some methods without parentheses
+    (`this.get_data_width`, `this.get_verbosity`), which Verilator rejects.
+  - The blocker: the shims hand the VIP its interface through a hierarchical
+    path (`tb_top.mst_vip.inst.IF`), as Xilinx's examples do. Verilator 5.032
+    crashes with an internal fault on a parameterized interface passed to a
+    virtual interface by hierarchical path. A 30-line example reproduces it.
+    The first two problems can be worked around (a stub checker, a patched
+    copy of the package); this one would need changes to Xilinx's code.
+
+  A newer Verilator might get further, but even then it is untested whether
+  the VIP's class-based driver, monitor and mailboxes, and the DPI calls from
+  cocotb callbacks, work there.
