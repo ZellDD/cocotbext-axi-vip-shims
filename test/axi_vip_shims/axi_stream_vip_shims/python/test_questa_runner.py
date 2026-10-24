@@ -6,7 +6,7 @@ one library, and runs the cocotb tests with lib/libaxis_dpi.so loaded by vsim
 (-sv_lib) and by cocotb (AXIS_DPI_LIB). With AXIS_VIP_SRC set, all VIP sources
 come from there instead and Vivado is not needed.
 
-    python3 test_runner.py            (or: pytest test_runner.py)
+    python3 test_questa_runner.py     (or: pytest test_questa_runner.py)
 
 Environment:
     AXIS_VIP_SRC     use your own VIP sources instead of Vivado:
@@ -28,7 +28,8 @@ Environment:
     GUI=1            open the Questa GUI (all selected tests in one session)
     TESTCASE         run only these tests (comma-separated)
     BENCH=1          run the benchmark (test_axis_benchmark.py) instead and
-                     write artifacts/logs/benchmark.txt; BENCH_BEATS=<n> beats
+                     write artifacts/logs/benchmark.txt; BENCH_BEATS=<n> beats,
+                     BENCH_REPEATS=<n> runs per case (default 3, each a fresh vsim)
 
 Logs: artifacts/logs/build.log and artifacts/logs/<test>.log.
 """
@@ -250,7 +251,7 @@ def run_questa(testcase, module="test_axis_vip", waves=None):
         testcase=names,
         build_dir=BUILD_DIR,
         test_args=args,
-        extra_env={"AXIS_DPI_LIB": str(lib)},
+        extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name},
         results_xml=str(BUILD_DIR / f"{name}.results.xml"),   # pytest wants absolute
         log_file=LOG_DIR / f"{name}.log",
         waves=waves,
@@ -274,24 +275,45 @@ BENCH_DIR = LOG_DIR / "benchmark"
 
 
 def benchmark():
-    """Run every bench_* test of test_axis_benchmark.py in its own vsim, without
-    waves (logging would dominate the timing), and tabulate the results into
+    """Run every bench_* test of test_axis_benchmark.py BENCH_REPEATS times
+    (default 3), each run in a fresh vsim and without waves (logging would
+    dominate the timing). Tabulates median wall time and spread into
     artifacts/logs/benchmark.txt. Returns (table, results.xml paths)."""
     import json
+    import statistics
+    repeats = int(os.environ.get("BENCH_REPEATS", 3))
     shutil.rmtree(BENCH_DIR, ignore_errors=True)
-    xmls = [run_questa(t, module="test_axis_benchmark", waves=False)
-            for t in cocotb_tests("test_axis_benchmark")]
-    rows = [json.loads(f.read_text()) for f in sorted(BENCH_DIR.glob("*.json"))]
-    head = ("test", "flavour", "beats", "beats/pkt", "wall [s]", "beats/s",
-            "sim [us]", "beats/cycle")
-    body = [(r["test"], r["flavour"], r["beats"], r["beats_per_packet"],
-             f'{r["wall_s"]:.2f}', f'{r["beats_per_s"]:,}', f'{r["sim_us"]:.1f}',
-             f'{r["beats_per_cycle"]:.3f}') for r in rows]
+    xmls, runs = [], {}
+    for _ in range(repeats):             # interleaved, so drift hits every case
+        for t in cocotb_tests("test_axis_benchmark"):
+            xml = run_questa(t, module="test_axis_benchmark", waves=False)
+            xmls.append(xml)
+            f = BENCH_DIR / f"{t}.json"
+            if f.is_file():
+                runs.setdefault(t, []).append(json.loads(f.read_text()))
+                f.unlink()
+            elif get_results(xml)[1] == 0:       # no result and no failure either
+                raise RuntimeError(f"{t} passed but wrote no {f.name}")
+
+    head = ("test", "flavour", "reads", "beats", "beats/pkt", "runs",
+            "wall [s]", "spread", "beats/s", "sim [us]", "beats/cycle")
+    body = []
+    for t in sorted(runs):
+        rs = runs[t]
+        walls = [r["wall_s"] for r in rs]
+        med = statistics.median(walls)
+        r = rs[0]
+        body.append((t, r["flavour"], r["reads"], r["beats"], r["beats_per_packet"],
+                     len(rs), f"{med:.2f}", f"{(max(walls) - min(walls)) / med:.0%}",
+                     f"{round(r['beats'] / med):,}", f'{r["sim_us"]:.1f}',
+                     f'{r["beats_per_cycle"]:.3f}'))
     widths = [max(len(str(c)) for c in col) for col in zip(head, *body)]
     line = lambda cells: "  ".join(str(c).rjust(w) for c, w in zip(cells, widths))  # noqa: E731
     table = "\n".join([line(head), line("-" * w for w in widths)] + [line(b) for b in body])
-    (LOG_DIR / "benchmark.txt").write_text(table + "\n")
-    return table, xmls
+    note = (f"\nmedian of {repeats} runs per case, each in a fresh vsim; "
+            "spread = (max - min) / median of the wall times\n")
+    (LOG_DIR / "benchmark.txt").write_text(table + "\n" + note)
+    return table + "\n" + note, xmls
 
 
 # Opt-in: takes a while and measures speed rather than correctness.

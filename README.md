@@ -53,19 +53,26 @@ fails with "has not registered".
 ## Layout
 
 ```
-src/
+CMakeLists.txt, src/CMakeLists.txt
+install.sh                       venv + build + tests in one go
+Makefile                         make / make test / make clean
+requirements.txt, conftest.py
+src/axi_vip_shims/axi_stream_vip_shim/
   CMakeLists.txt
-  axi_vip_shims/axi_stream_vip_shim/
-    CMakeLists.txt
-    src/hdl/axis_vip_dpi.sv      SV shims (master + slave)
-    src/dpi_c/axis_dpi.c         DPI-C trampoline
-    src/pyhon/axis_vip_dpi.py    cocotb classes
+  src/hdl/axis_vip_dpi.sv        SV shims (master + slave)
+  src/dpi_c/axis_dpi.c           DPI-C trampoline
+  src/pyhon/axis_vip_dpi.py      cocotb classes
 test/axi_vip_shims/axi_stream_vip_shims/
-  hdl/tb_top.sv                  example top: VIP master -> VIP slave loopback
-  python/test_axis_vip.py        cocotb tests (needs Vivado simulator + VIPs)
+  hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
+  hdl/gen_vip.tcl                generates the two VIP cores in Vivado batch mode
+  python/test_axis_vip.py        functional cocotb tests, one per AXI4-Stream option
+  python/test_axis_benchmark.py  benchmark: VIP shims vs cocotbext-axi
+  python/test_questa_runner.py   builds and runs the two files above on Questa
   python/test_c_side.py          simulator-free test of the C + Python layers
   dpi_c/test_c_side_mock.c       mock simulator/SV side for test_c_side.py
-lib/                             built shared libraries
+  artifacts/logs, artifacts/wlf  per-test logs and Questa waveforms (generated)
+lib/                             built shared libraries (generated)
+build/                           CMake build, generated VIP cores, Questa work library
 ```
 
 ## Requirements
@@ -225,14 +232,17 @@ TKEEP=0. Pass both.
 
 - **Full simulation** ([test_axis_vip.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip.py)):
   runs against [tb_top.sv](test/axi_vip_shims/axi_stream_vip_shims/hdl/tb_top.sv),
-  a VIP master → VIP slave loopback. It covers round-trips of every signal,
-  packets, runtime backpressure changes, stall/release, and constructor
-  mismatch detection. It is started by
-  [test_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_runner.py),
+  a VIP master → VIP slave loopback. There is one test per AXI4-Stream
+  option: TDATA, TKEEP, TSTRB, TLAST, TID, TDEST, TUSER, `delay`, each
+  backpressure mode (none, osc, random, stall/release, change in flight),
+  `flush()`, `wait_idle()`, argument checking and constructor mismatch
+  detection. A monitor on the bus wires checks delays and backpressure by the
+  cycle. The tests are started by
+  [test_questa_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py),
   which generates the VIP cores into `build/ip/` on first run:
 
   ```sh
-  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_runner.py
+  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py
   ```
 
   It finds Vivado through `XILINX_VIVADO` or `vivado` on `PATH`. Each cocotb
@@ -240,7 +250,7 @@ TKEEP=0. Pass both.
   `test/axi_vip_shims/axi_stream_vip_shims/artifacts/logs/<test>.log` and
   records all signals to `.../artifacts/wlf/<test>.wlf`. The build log is
   `artifacts/logs/build.log`. Open a waveform with
-  `vsim -view <path>/artifacts/wlf/test_beats_and_backpressure.wlf`. Set `WAVES=0` to
+  `vsim -view <path>/artifacts/wlf/test_tdata.wlf`. Set `WAVES=0` to
   skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
   test. `./install.sh` builds everything and runs both test sets.
 
@@ -290,9 +300,32 @@ It is opt-in and runs without waveform recording:
 BENCH=1 python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py
 BENCH=1 pytest -k benchmark -s           # same, through pytest
 BENCH_BEATS=50000 BENCH=1 ...            # more beats
+BENCH_REPEATS=5 BENCH=1 ...              # runs per case (default 3)
 ```
 
-The table goes to `artifacts/logs/benchmark.txt`.
+Every run of every case is a fresh `vsim`. The table, with the median wall
+time and the spread across runs, goes to `artifacts/logs/benchmark.txt`.
+cocotbext-axi's per-frame INFO logging is switched off during the benchmark,
+because the shims log nothing per beat.
+
+Two things are varied. The packet size (16 beats or 1) matters for
+cocotbext-axi, which builds a frame per packet. The other is *when the
+receiver reads* (the `reads` column): `as it comes` takes each beat the moment
+it arrives, which is all cocotbext-axi's sink does and what `get_transaction()`
+does. `every B` lets the shim queue the beats while cocotb sleeps on a timer
+(no per-beat wakeups) until B are waiting, then drains those B
+(`bench_vip_packets_batch_*`). The packet size doesn't matter to the shims.
+
+Taking every beat as it arrives, the shims are slower than cocotbext-axi
+(about 17 s against 14 s for 16-beat packets on Questa Starter), and batched
+reads are about 1.6× faster than cocotbext-axi. Batching costs read latency: a
+beat can be read up to B cycles late. Most of the shim time is the Xilinx VIP
+itself, which cocotbext-axi's plain bus doesn't have, so this is a
+comparison of the two setups and not a measure of the shims' own overhead.
+
+`pending` is updated in the NBA region, so right after `try_get_transaction()`
+it still shows the old count until the time step settles. Wait a simulator
+step (or any delay) before relying on it after draining.
 
 ## Questa notes
 

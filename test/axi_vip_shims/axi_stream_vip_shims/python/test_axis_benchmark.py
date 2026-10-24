@@ -9,11 +9,21 @@ measures per-call overhead). Every beat carries TKEEP/TLAST/TID/TDEST/TUSER,
 and the receiver checks every byte. No backpressure, so the bus could take a
 beat every cycle.
 
+How the receiver gets its beats is the other variable ("reads" in the table):
+  as it comes  cocotb takes each beat right when it arrives. This is all
+               cocotbext-axi's sink does (it samples the bus every cycle and
+               hands over frames as they complete) and what get_transaction()
+               does.
+  every B      the shim queues the beats; cocotb sleeps until B are waiting,
+               drains those B, and sleeps again (bench_vip_batch_*).
+
 Each test writes its numbers to artifacts/logs/benchmark/<test>.json;
-test_questa_runner.py collects them into artifacts/logs/benchmark.txt.
+test_questa_runner.py runs every test BENCH_REPEATS times, each in a fresh
+vsim, and collects the medians into artifacts/logs/benchmark.txt.
 Run through the runner (BENCH=1 or the test_benchmark pytest case).
 """
 import json
+import logging
 import os
 import random
 import time
@@ -30,6 +40,9 @@ W = 4                                   # TDATA bytes, as tb_top.sv
 CLK_NS = 10
 IFACE = dict(tdata_width=8 * W, has_tkeep=True, has_tstrb=True, has_tlast=True,
              tid_width=4, tdest_width=4, tuser_width=4)
+# The runner names the result file after the test it launches, so renaming a
+# test cannot leave the table out of sync.
+TEST_NAME = os.environ.get("BENCH_NAME", "unnamed")
 RESULT_DIR = Path(__file__).resolve().parent.parent / "artifacts" / "logs" / "benchmark"
 
 
@@ -58,12 +71,13 @@ class Stopwatch:
     def __init__(self):
         self.wall, self.sim = time.perf_counter(), get_sim_time("ns")
 
-    def result(self, dut, name, flavour, beats_per_packet, n_packets):
+    def result(self, dut, flavour, beats_per_packet, n_packets, reads="-"):
+        name = TEST_NAME
         wall = time.perf_counter() - self.wall
         sim_ns = get_sim_time("ns") - self.sim
         cycles = sim_ns / CLK_NS
-        r = dict(test=name, flavour=flavour, beats=N_BEATS, packets=n_packets,
-                 beats_per_packet=beats_per_packet, wall_s=round(wall, 3),
+        r = dict(test=name, flavour=flavour, reads=reads, beats=N_BEATS,
+                 packets=n_packets, beats_per_packet=beats_per_packet, wall_s=round(wall, 3),
                  sim_us=round(sim_ns / 1000, 2), cycles=int(cycles),
                  beats_per_s=round(N_BEATS / wall), beats_per_cycle=round(N_BEATS / cycles, 3))
         RESULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -80,11 +94,15 @@ async def bench_idle(dut):
     await reset(dut)
     sw = Stopwatch()
     await Timer(N_BEATS * CLK_NS, "ns")          # not ClockCycles: no wakeups
-    sw.result(dut, "bench_idle", "no traffic", 0, 0)
+    sw.result(dut, "no traffic", 0, 0)
 
 
 # ------------------------------------------------------------- VIP + shims
-async def _bench_vip(dut, name, beats_per_packet, bulk=False):
+async def _bench_vip(dut, beats_per_packet, batch=None):
+    """batch=None: `await get_transaction()` for every beat, woken by the
+    shim's status signal: cocotb takes each beat as it arrives, like
+    cocotbext-axi's sink. batch=B: cocotb sleeps on a timer (no per-beat
+    wakeups) until B beats are queued in the shim, drains those B, repeats."""
     await reset(dut)
     mst = AXIS_MASTER_VIP("mst0", dut.mst_shim, **IFACE)
     slv = AXIS_SLAVE_VIP("slv0", dut.slv_shim, **IFACE)
@@ -92,82 +110,100 @@ async def _bench_vip(dut, name, beats_per_packet, bulk=False):
     slv.check()
     pkts = packets(beats_per_packet)
 
-    async def sender():
-        for data, tid, tdest, tuser in pkts:
-            beats = [data[i:i + W] for i in range(0, len(data), W)]
-            for n, chunk in enumerate(beats):
-                keep = (1 << len(chunk)) - 1
-                mst.put_transaction(tdata=int.from_bytes(chunk, "little"),
-                                    tkeep=keep, tstrb=keep,
-                                    tlast=(n == len(beats) - 1),
-                                    tid=tid, tdest=tdest, tuser=tuser)
-
     sw = Stopwatch()
-    await sender()                       # put_transaction() takes no sim time
-    if bulk:
-        # sleep through the whole transfer, no per-beat wakeups: only the
-        # SV shims and the VIP run until everything has arrived
-        while slv.pending < N_BEATS:
-            await Timer((N_BEATS - slv.pending + 8) * CLK_NS, "ns")
+    for data, tid, tdest, tuser in pkts:          # put_transaction(): no sim time
+        beats = [data[i:i + W] for i in range(0, len(data), W)]
+        for n, chunk in enumerate(beats):
+            keep = (1 << len(chunk)) - 1
+            mst.put_transaction(tdata=int.from_bytes(chunk, "little"),
+                                tkeep=keep, tstrb=keep,
+                                tlast=(n == len(beats) - 1),
+                                tid=tid, tdest=tdest, tuser=tuser)
+
+    got = []
+    if batch is None:
+        for _ in range(N_BEATS):
+            got.append(await slv.get_transaction())
+    else:
+        while len(got) < N_BEATS:
+            want = min(batch, N_BEATS - len(got))
+            while slv.pending < want:
+                # the bus delivers one beat per clock: sleep for the rest
+                await Timer((want - slv.pending) * CLK_NS, "ns")
+            for _ in range(want):
+                got.append(slv.try_get_transaction())
+            # `pending` (rx_count) is updated in the NBA region: still the old
+            # value in this time step, so let it settle before reading it again
+            await Timer(1, "step")
+
+    beats_iter = iter(got)
     for data, tid, tdest, tuser in pkts:
         out = bytearray()
-        while True:
-            t = await slv.get_transaction()
+        for t in beats_iter:
             raw = t.tdata.to_bytes(W, "little")
             out += bytes(b for i, b in enumerate(raw) if (t.tkeep >> i) & 1)
             assert (t.tid, t.tdest, t.tuser) == (tid, tdest, tuser)
             if t.tlast:
                 break
         assert bytes(out) == data
-    return sw.result(dut, name, "vip shim" + (" (bulk)" if bulk else ""),
-                     beats_per_packet, len(pkts))
+    return sw.result(dut, "vip shim", beats_per_packet, len(pkts),
+                     reads="as it comes" if batch is None else f"every {batch}")
 
 
 @cocotb.test()
 async def bench_vip_packets(dut):
-    await with_timeout(_bench_vip(dut, "bench_vip_packets", 16), 10, "ms")
-
-
-@cocotb.test()
-async def bench_vip_16_bulk(dut):
-    """16-beat packets, but cocotb sleeps until all beats have arrived and
-    then reads them: the cost of the SV shims + VIP alone."""
-    await with_timeout(_bench_vip(dut, "bench_vip_16_bulk", 16, bulk=True), 10, "ms")
-
-
-@cocotb.test()
-async def bench_vip_64_bulk(dut):
-    """64-beat packets, but cocotb sleeps until all beats have arrived and
-    then reads them: the cost of the SV shims + VIP alone."""
-    await with_timeout(_bench_vip(dut, "bench_vip_64_bulk", 64, bulk=True), 10, "ms")
-
-
-@cocotb.test()
-async def bench_vip_128_bulk(dut):
-    """128-beat packets, but cocotb sleeps until all beats have arrived and
-    then reads them: the cost of the SV shims + VIP alone."""
-    await with_timeout(_bench_vip(dut, "bench_vip_128_bulk", 128, bulk=True), 10, "ms")
-
-
-@cocotb.test()
-async def bench_vip_256_bulk(dut):
-    """256-beat packets, but cocotb sleeps until all beats have arrived and
-    then reads them: the cost of the SV shims + VIP alone."""
-    await with_timeout(_bench_vip(dut, "bench_vip_256_bulk", 256, bulk=True), 10, "ms")
+    """16-beat packets, every beat taken as it arrives."""
+    await with_timeout(_bench_vip(dut, 16), 10, "ms")
 
 
 @cocotb.test()
 async def bench_vip_beats(dut):
-    await with_timeout(_bench_vip(dut, "bench_vip_beats", 1), 10, "ms")
+    """Single-beat packets, every beat taken as it arrives."""
+    await with_timeout(_bench_vip(dut, 1), 10, "ms")
+
+
+# 16-beat packets, read in batches: wait until B beats are queued in the
+# shim, then take those B. The packet size stays the same as above, only the
+# batch changes.
+@cocotb.test()
+async def bench_vip_packets_batch_16(dut):
+    await with_timeout(_bench_vip(dut, 16, batch=16), 10, "ms")
+
+
+@cocotb.test()
+async def bench_vip_packets_batch_64(dut):
+    await with_timeout(_bench_vip(dut, 16, batch=64), 10, "ms")
+
+
+@cocotb.test()
+async def bench_vip_packets_batch_128(dut):
+    await with_timeout(_bench_vip(dut, 16, batch=128), 10, "ms")
+
+
+@cocotb.test()
+async def bench_vip_packets_batch_256(dut):
+    await with_timeout(_bench_vip(dut, 16, batch=256), 10, "ms")
+
+
+@cocotb.test()
+async def bench_vip_packets_batch_all(dut):
+    """Everything queued in the shim first, then one pass over all of it."""
+    await with_timeout(_bench_vip(dut, 16, batch=N_BEATS),
+                       10, "ms")
 
 
 # ------------------------------------------------------------ cocotbext-axi
-async def _bench_ext(dut, name, beats_per_packet):
+async def _bench_ext(dut, beats_per_packet):
     from cocotbext.axi import AxiStreamBus, AxiStreamFrame, AxiStreamSink, AxiStreamSource
 
     bus = AxiStreamBus.from_prefix(dut, "bm")
     src = AxiStreamSource(bus, dut.aclk, dut.aresetn, reset_active_level=False)
     sink = AxiStreamSink(bus, dut.aclk, dut.aresetn, reset_active_level=False)
+    # cocotbext-axi logs every frame at INFO ("TX frame" / "RX frame"), which
+    # the shims don't: that formatting and transcript writing would be timed
+    # too. Keep its setup messages, drop the per-frame ones.
+    src.log.setLevel(logging.WARNING)
+    sink.log.setLevel(logging.WARNING)
     await reset(dut)
     pkts = packets(beats_per_packet)
 
@@ -178,14 +214,15 @@ async def _bench_ext(dut, name, beats_per_packet):
         f = await sink.recv()
         assert bytes(f.tdata) == data
         assert (f.tid, f.tdest, f.tuser) == (tid, tdest, tuser), f
-    return sw.result(dut, name, "cocotbext-axi", beats_per_packet, len(pkts))
+    return sw.result(dut, "cocotbext-axi", beats_per_packet, len(pkts),
+                     reads="as it comes")
 
 
 @cocotb.test()
 async def bench_ext_packets(dut):
-    await with_timeout(_bench_ext(dut, "bench_ext_packets", 16), 10, "ms")
+    await with_timeout(_bench_ext(dut, 16), 10, "ms")
 
 
 @cocotb.test()
 async def bench_ext_beats(dut):
-    await with_timeout(_bench_ext(dut, "bench_ext_beats", 1), 10, "ms")
+    await with_timeout(_bench_ext(dut, 1), 10, "ms")
