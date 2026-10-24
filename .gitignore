@@ -1,0 +1,118 @@
+# =============================================================================
+# C / C++
+# =============================================================================
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.d
+*.gch
+*.pch
+
+# Build output (keep build/ and lib/ placeholders)
+build/*
+!build/.gitkeep
+lib/*
+!lib/.gitkeep
+
+# =============================================================================
+# CMake
+# =============================================================================
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+_deps/
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# =============================================================================
+# cocotb
+# =============================================================================
+sim_build/
+results.xml
+*.vcd
+*.fst
+*.fst.hier
+*.ghw
+*.lxt
+*.lxt2
+
+# =============================================================================
+# SystemVerilog / HDL simulators
+# =============================================================================
+# Questa / ModelSim
+work/
+transcript
+modelsim.ini
+*.wlf
+*.ucdb
+
+# Vivado xsim
+xsim.dir/
+.Xil/
+*.jou
+*.log
+*.pb
+*.wdb
+webtalk*
+
+# Verilator
+obj_dir/
+
+# Icarus
+*.vvp
+
+# Cadence Xcelium
+xcelium.d/
+INCA_libs/
+*.shm/
+*.trn
+*.dsn
+
+# Synopsys VCS
+csrc/
+simv
+simv.daidir/
+ucli.key
+*.vpd
+*.fsdb
+
+# =============================================================================
+# Editors / OS
+# =============================================================================
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+.DS_Store
