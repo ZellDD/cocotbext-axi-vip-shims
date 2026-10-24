@@ -1,2 +1,3 @@
 cocotb>=2.0
 pytest
+cocotbext-axi    # benchmark comparison only

@@ -48,4 +48,15 @@ module tb_top;
                      .HAS_TKEEP(1), .HAS_TSTRB(1), .HAS_TLAST(1),
                      .ID_W(ID_W), .DEST_W(DEST_W), .USER_W(USER_W))
                      slv_shim ();
+
+  // Plain AXI4-Stream loopback without any VIP, for the cocotbext-axi side of
+  // test_axis_benchmark.py: its AxiStreamSource drives these, its
+  // AxiStreamSink drives bm_tready. Same widths, no TSTRB (cocotbext-axi has
+  // none).
+  logic                    bm_tvalid, bm_tready, bm_tlast;
+  logic [DATA_BYTES*8-1:0] bm_tdata;
+  logic [DATA_BYTES-1:0]   bm_tkeep;
+  logic [ID_W-1:0]         bm_tid;
+  logic [DEST_W-1:0]       bm_tdest;
+  logic [USER_W-1:0]       bm_tuser;
 endmodule

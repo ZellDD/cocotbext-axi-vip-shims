@@ -27,6 +27,8 @@ Environment:
                      artifacts/wlf/<test>.wlf; view with `vsim -view <file>`)
     GUI=1            open the Questa GUI (all selected tests in one session)
     TESTCASE         run only these tests (comma-separated)
+    BENCH=1          run the benchmark (test_axis_benchmark.py) instead and
+                     write artifacts/logs/benchmark.txt; BENCH_BEATS=<n> beats
 
 Logs: artifacts/logs/build.log and artifacts/logs/<test>.log.
 """
@@ -181,9 +183,9 @@ def _dpi_lib():
     return lib.resolve()
 
 
-def cocotb_tests():
-    """Names of the @cocotb.test()s in test_axis_vip.py, in file order."""
-    src = (HERE / "test_axis_vip.py").read_text()
+def cocotb_tests(module="test_axis_vip"):
+    """Names of the @cocotb.test()s in <module>.py, in file order."""
+    src = (HERE / f"{module}.py").read_text()
     return re.findall(r"@cocotb\.test\([^)]*\)\s*\n\s*async def (\w+)", src)
 
 
@@ -221,7 +223,7 @@ def build():
     return runner
 
 
-def run_questa(testcase):
+def run_questa(testcase, module="test_axis_vip", waves=None):
     """Run one cocotb test (or a list, in one vsim). Its log goes to
     artifacts/logs/<name>.log and its waves to artifacts/wlf/<name>.wlf.
     Returns the results.xml path."""
@@ -229,7 +231,8 @@ def run_questa(testcase):
     lib = _dpi_lib()
     names = [testcase] if isinstance(testcase, str) else list(testcase)
     name = names[0] if len(names) == 1 else "tests"
-    waves = os.environ.get("WAVES", "1") != "0"
+    if waves is None:
+        waves = os.environ.get("WAVES", "1") != "0"
 
     # -sv_lib takes the path without the .so extension.
     # -dpioutoftheblue: cocotb calls the shims' DPI exports from VPI
@@ -242,7 +245,7 @@ def run_questa(testcase):
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     return runner.test(
-        test_module="test_axis_vip",
+        test_module=module,
         hdl_toplevel=TOPLEVEL,
         testcase=names,
         build_dir=BUILD_DIR,
@@ -266,6 +269,44 @@ def _selected():
 def test_axis_vip_questa(testcase):
     run_questa(testcase)
 
+
+BENCH_DIR = LOG_DIR / "benchmark"
+
+
+def benchmark():
+    """Run every bench_* test of test_axis_benchmark.py in its own vsim, without
+    waves (logging would dominate the timing), and tabulate the results into
+    artifacts/logs/benchmark.txt. Returns (table, results.xml paths)."""
+    import json
+    shutil.rmtree(BENCH_DIR, ignore_errors=True)
+    xmls = [run_questa(t, module="test_axis_benchmark", waves=False)
+            for t in cocotb_tests("test_axis_benchmark")]
+    rows = [json.loads(f.read_text()) for f in sorted(BENCH_DIR.glob("*.json"))]
+    head = ("test", "flavour", "beats", "beats/pkt", "wall [s]", "beats/s",
+            "sim [us]", "beats/cycle")
+    body = [(r["test"], r["flavour"], r["beats"], r["beats_per_packet"],
+             f'{r["wall_s"]:.2f}', f'{r["beats_per_s"]:,}', f'{r["sim_us"]:.1f}',
+             f'{r["beats_per_cycle"]:.3f}') for r in rows]
+    widths = [max(len(str(c)) for c in col) for col in zip(head, *body)]
+    line = lambda cells: "  ".join(str(c).rjust(w) for c, w in zip(cells, widths))  # noqa: E731
+    table = "\n".join([line(head), line("-" * w for w in widths)] + [line(b) for b in body])
+    (LOG_DIR / "benchmark.txt").write_text(table + "\n")
+    return table, xmls
+
+
+# Opt-in: takes a while and measures speed rather than correctness.
+@pytest.mark.skipif(os.environ.get("BENCH") != "1", reason="set BENCH=1 to run")
+def test_benchmark():
+    table, _ = benchmark()
+    print("\n" + table)
+
+
+if __name__ == "__main__" and os.environ.get("BENCH") == "1":
+    table, xmls = benchmark()
+    print(table)
+    print(f"\nwritten to {LOG_DIR / 'benchmark.txt'}")
+    failed = sum(get_results(x)[1] for x in xmls)
+    sys.exit(1 if failed else 0)
 
 if __name__ == "__main__":
     # standalone, the runner does not check results.xml: do it here

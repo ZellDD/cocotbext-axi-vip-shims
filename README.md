@@ -269,6 +269,23 @@ VIP API calls differently. The shim keeps every VIP call in a `vip_*` task in
 [axis_vip_dpi.sv](src/axi_vip_shims/axi_stream_vip_shim/src/hdl/axis_vip_dpi.sv)
 so they can be adapted. Only Vivado 2025.2 has been tested.
 
+### Benchmark
+
+[test_axis_benchmark.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark.py)
+pushes 10,240 beats (TKEEP, TLAST, TID, TDEST, TUSER; every byte checked)
+through the VIP shims and, for comparison, through
+[cocotbext-axi](https://github.com/alexforencich/cocotbext-axi)'s
+`AxiStreamSource`/`AxiStreamSink` on a plain loopback (`bm_*` in `tb_top.sv`).
+It is opt-in and runs without waveform recording:
+
+```sh
+BENCH=1 python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py
+BENCH=1 pytest -k benchmark -s           # same, through pytest
+BENCH_BEATS=50000 BENCH=1 ...            # more beats
+```
+
+The table goes to `artifacts/logs/benchmark.txt`.
+
 ## Questa notes
 
 The runner sets three things that the shims need on Questa:
