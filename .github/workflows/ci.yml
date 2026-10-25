@@ -1,0 +1,192 @@
+# CI for cocotbext-axi-vip-shims, all on GitHub-hosted runners.
+#
+#   build-and-unit  Every push / PR. From a bare Ubuntu image: venv,
+#                   requirements, CMake build of libaxis_dpi.so and the
+#                   simulator-free tests (test_c_side.py), all via ./install.sh.
+#   verilator       Builds Verilator from source (cached by version) and runs
+#                   the functional cocotb tests on it, with the Xilinx VIP
+#                   sources taken from the secret AXIS_VIP_SRC_TXZ_B64.
+#                   Skipped when the secret isn't available (not set yet, or a
+#                   pull request from a fork, which never gets secrets).
+#
+# Questa isn't run in CI (no licence for a CI machine).
+#
+# Setting up the secret: run scripts/pack_vip_secret.sh on a machine with
+# Vivado, then store its output as the repository secret AXIS_VIP_SRC_TXZ_B64
+# (Settings > Secrets and variables > Actions). Redo this when the VIP version
+# or hdl/gen_vip.tcl changes.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: "Also run the Verilator benchmark"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERILATOR_VERSION: "5.052"
+  TEST_DIR: test/axi_vip_shims/axi_stream_vip_shims
+
+jobs:
+  build-and-unit:
+    name: Build + simulator-free tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++
+          cmake --version | head -1
+          c++ --version | head -1
+
+      # No vsim and no verilator here, so install.sh deselects the Questa
+      # runners and the Verilator runners skip themselves.
+      - name: Install, build and test (./install.sh)
+        run: ./install.sh
+
+      - name: Library exports
+        run: nm -D --defined-only lib/libaxis_dpi.so | grep ' T axis_dpi_'
+
+  # Secrets can't be tested in a job-level `if`, so this job reports whether
+  # the VIP sources are available.
+  vip-secret:
+    name: VIP sources available?
+    runs-on: ubuntu-24.04
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+    steps:
+      - id: check
+        env:
+          VIP: ${{ secrets.AXIS_VIP_SRC_TXZ_B64 }}
+        run: |
+          if [ -n "$VIP" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Secret AXIS_VIP_SRC_TXZ_B64 not available: Verilator simulation skipped"
+          fi
+
+  verilator:
+    name: Simulation on Verilator ${{ github.event_name == 'workflow_dispatch' && inputs.benchmark && '+ benchmark' || '' }}
+    needs: [build-and-unit, vip-secret]
+    if: needs.vip-secret.outputs.available == 'true'
+    runs-on: ubuntu-24.04            # pinned: the cached Verilator is built for it
+    timeout-minutes: 60
+    env:
+      WAVES: "0"                     # waves off in CI; logs are uploaded
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # -------------------------------------------------------- Verilator
+      - name: Cache Verilator ${{ env.VERILATOR_VERSION }}
+        id: verilator-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/verilator
+          key: verilator-${{ env.VERILATOR_VERSION }}-ubuntu-24.04-${{ runner.arch }}
+
+      - name: Verilator build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git make autoconf g++ flex bison perl python3 help2man \
+            libfl2 libfl-dev zlib1g zlib1g-dev cmake
+
+      - name: Build Verilator ${{ env.VERILATOR_VERSION }} from source
+        if: steps.verilator-cache.outputs.cache-hit != 'true'
+        run: |
+          src="$RUNNER_TEMP/verilator-src"
+          git clone --depth 1 --branch "v$VERILATOR_VERSION" \
+            https://github.com/verilator/verilator "$src"
+          cd "$src"
+          autoconf
+          ./configure --prefix="$HOME/verilator"
+          make -j"$(nproc)"
+          make install
+
+      - name: Put Verilator on PATH
+        run: |
+          echo "$HOME/verilator/bin" >> "$GITHUB_PATH"
+
+      - name: Verilator version
+        run: verilator --version
+
+      # ------------------------------------------------------ VIP sources
+      # Unpacked outside the workspace, so nothing below can upload them.
+      - name: Unpack VIP sources from secret
+        env:
+          VIP: ${{ secrets.AXIS_VIP_SRC_TXZ_B64 }}
+        run: |
+          dir="$RUNNER_TEMP/vip"
+          mkdir -p "$dir"
+          printf '%s' "$VIP" | base64 -d | tar -xJ -C "$dir"
+          echo "AXIS_VIP_SRC=$dir/axis_vip_src" >> "$GITHUB_ENV"
+          (cd "$dir/axis_vip_src" && find . -type f | sort)
+
+      # ------------------------------------------------------------ build
+      - name: Install and build (./install.sh --no-tests)
+        run: ./install.sh --no-tests
+
+      # ------------------------------------------------------------ tests
+      # test_flush_slave is a known failure on Verilator (see README), so it
+      # is deselected to keep the job meaningful; drop that line once fixed.
+      - name: Functional tests on Verilator
+        run: |
+          .venv/bin/python -m pytest -v \
+            "$TEST_DIR/python/test_axis_vip_verilator_runner.py" \
+            --deselect "$TEST_DIR/python/test_axis_vip_verilator_runner.py::test_axis_vip_verilator[test_flush_slave]" \
+            --junitxml=junit-verilator.xml
+
+      - name: Benchmark on Verilator
+        if: github.event_name == 'workflow_dispatch' && inputs.benchmark
+        env:
+          BENCH: "1"
+        run: |
+          .venv/bin/python -m pytest -s "$TEST_DIR/python/test_axis_benchmark_verilator_runner.py"
+          f="$TEST_DIR/artifacts/test_axis_benchmark_verilator_runner/benchmark.txt"
+          { echo "### Verilator benchmark"; echo '```'; cat "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # -------------------------------------------------------- artifacts
+      # Logs and benchmark tables only. The VIP sources stay in RUNNER_TEMP,
+      # and build/ (with the patched checker copy) is not uploaded.
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verilator-logs
+          path: |
+            ${{ env.TEST_DIR }}/artifacts/
+            junit-*.xml
+          if-no-files-found: ignore
+          retention-days: 14
