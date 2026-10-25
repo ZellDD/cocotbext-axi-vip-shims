@@ -25,6 +25,10 @@
 //
 // Every call into the Xilinx VIP API sits in a task whose name starts with
 // vip_ so it is easy to adjust per Vivado version (PG277).
+//
+// Debug log: with AXIS_DPI_DEBUG=1 in the environment (read once, through
+// axis_dpi_debug() in the C library) both shims $display every DPI call and
+// every hand-over to/from the VIP. Off, each log point costs one bit test.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -54,6 +58,9 @@ package axis_dpi_pkg;
   // Keep in sync with VEC_WORDS in axis_dpi.cpp.
   localparam int AXIS_VEC_BITS = 4096;
   typedef bit [AXIS_VEC_BITS-1:0] axis_vec_t;
+
+  // AXIS_DPI_DEBUG set? Called once per shim, from its initial block.
+  import "DPI-C" function int axis_dpi_debug();
 endpackage
 
 
@@ -111,6 +118,26 @@ module axis_vip_dpi_mst #(
   // Status for cocotb (read-only there): transfers put but not yet on the bus.
   logic [31:0] outstanding = '0;
 
+  bit dbg = 1'b0;              // AXIS_DPI_DEBUG
+
+  function automatic void dbg_line(string msg);
+    $display("%0t axis_vip_dpi_mst %s: %s", $time, NAME, msg);
+    $fflush();                 // keep in order with the C and Python log
+  endfunction
+
+  // the beat's signals that exist in this interface
+  function automatic string beat_str(beat_t b);
+    string s;
+    s = $sformatf("data=0x%h", b.data);
+    if (HAS_TKEEP)  s = {s, $sformatf(" keep=0x%h", b.keep)};
+    if (HAS_TSTRB)  s = {s, $sformatf(" strb=0x%h", b.strb)};
+    if (HAS_TLAST)  s = {s, $sformatf(" last=%0d", b.last)};
+    if (ID_W   > 0) s = {s, $sformatf(" id=%0d", b.id)};
+    if (DEST_W > 0) s = {s, $sformatf(" dest=%0d", b.dest)};
+    if (USER_W > 0) s = {s, $sformatf(" user=0x%h", b.user)};
+    return {s, $sformatf(" delay=%0d", b.delay)};
+  endfunction
+
   // ---------------- DPI exports (called from cocotb via axis_dpi.cpp) ---------
   function int axis_mst_push(input axis_vec_t data, keep, strb, user,
                              input int last, id, dest, delay);
@@ -126,10 +153,13 @@ module axis_vip_dpi_mst #(
     tx_q.push_back(b);
     pushed++;
     outstanding <= pushed - done;
+    if (dbg) dbg_line($sformatf("push from cocotb: %s (tx_q=%0d, outstanding=%0d)",
+                                beat_str(b), tx_q.size(), pushed - done));
     return 0;
   endfunction
 
   function int axis_mst_flush();
+    if (dbg) dbg_line($sformatf("flush from cocotb: dropping %0d queued", tx_q.size()));
     pushed -= tx_q.size();
     tx_q.delete();
     outstanding <= pushed - done;
@@ -168,6 +198,7 @@ module axis_vip_dpi_mst #(
     forever begin
       wait (tx_q.size() > 0);
       b = tx_q.pop_front();
+      if (dbg) dbg_line($sformatf("to VIP driver: %s (tx_q=%0d)", beat_str(b), tx_q.size()));
       vip_send_beat(b);
       sent++;
     end
@@ -184,6 +215,8 @@ module axis_vip_dpi_mst #(
       vip_wait_idle();
       done = snap;
       outstanding <= pushed - done;
+      if (dbg) dbg_line($sformatf("VIP driver idle: %0d sent in total, outstanding=%0d",
+                                  done, pushed - done));
     end
   endtask
 
@@ -192,6 +225,8 @@ module axis_vip_dpi_mst #(
                                 int'(HAS_TSTRB), int'(HAS_TLAST),
                                 ID_W, DEST_W, USER_W);
     if (inst < 0) $fatal(1, "axis_vip_dpi_mst %s: register failed", NAME);
+    dbg = axis_dpi_debug() != 0;
+    if (dbg) dbg_line($sformatf("registered as inst %0d", inst));
     agent = new(NAME, `AXIS_MST_VIF);
     agent.set_agent_tag(NAME);
     agent.start_master();
@@ -265,14 +300,48 @@ module axis_vip_dpi_slv #(
   int bp_mode = BP_NONE, bp_low_min = 0, bp_low_max = 0,
       bp_high_min = 1, bp_high_max = 1;
 
+  bit dbg = 1'b0;              // AXIS_DPI_DEBUG
+
+  function automatic void dbg_line(string msg);
+    $display("%0t axis_vip_dpi_slv %s: %s", $time, NAME, msg);
+    $fflush();                 // keep in order with the C and Python log
+  endfunction
+
+  // the beat's signals that exist in this interface
+  function automatic string beat_str(beat_t b);
+    string s;
+    s = $sformatf("data=0x%h", b.data);
+    if (HAS_TKEEP)  s = {s, $sformatf(" keep=0x%h", b.keep)};
+    if (HAS_TSTRB)  s = {s, $sformatf(" strb=0x%h", b.strb)};
+    if (HAS_TLAST)  s = {s, $sformatf(" last=%0d", b.last)};
+    if (ID_W   > 0) s = {s, $sformatf(" id=%0d", b.id)};
+    if (DEST_W > 0) s = {s, $sformatf(" dest=%0d", b.dest)};
+    if (USER_W > 0) s = {s, $sformatf(" user=0x%h", b.user)};
+    return s;
+  endfunction
+
+  function automatic string bp_str(int mode, low_min, low_max, high_min, high_max);
+    case (mode)
+      BP_OSC:    return $sformatf("osc low=%0d high=%0d", low_min, high_min);
+      BP_RANDOM: return $sformatf("random low=%0d..%0d high=%0d..%0d",
+                                  low_min, low_max, high_min, high_max);
+      BP_STALL:  return "stall";
+      default:   return "none";
+    endcase
+  endfunction
+
   // ---------------- DPI exports (called from cocotb via axis_dpi.cpp) ---------
   function int axis_slv_pop(output axis_vec_t data, keep, strb, user,
                             output int last, id, dest);
     beat_t b;
     data = '0; keep = '0; strb = '0; user = '0;
     last = 0; id = 0; dest = 0;
-    if (rx_q.size() == 0) return 0;
+    if (rx_q.size() == 0) begin
+      if (dbg) dbg_line("pop from cocotb: empty");
+      return 0;
+    end
     b = rx_q.pop_front();
+    if (dbg) dbg_line($sformatf("pop from cocotb: %s (rx_q=%0d)", beat_str(b), rx_q.size()));
     data[DATA_BYTES*8-1:0] = b.data;
     keep[DATA_BYTES-1:0]   = b.keep;
     strb[DATA_BYTES-1:0]   = b.strb;
@@ -290,10 +359,13 @@ module axis_vip_dpi_slv #(
     bp_low_min = low_min;   bp_low_max = low_max;
     bp_high_min = high_min; bp_high_max = high_max;
     bp_version++;
+    if (dbg) dbg_line($sformatf("backpressure from cocotb: %s",
+                                bp_str(mode, low_min, low_max, high_min, high_max)));
     return 0;
   endfunction
 
   function int axis_slv_flush();
+    if (dbg) dbg_line($sformatf("flush from cocotb: dropping %0d received", rx_q.size()));
     rx_q.delete();
     rx_count <= 0;
     return 0;
@@ -368,6 +440,9 @@ module axis_vip_dpi_slv #(
       seen = bp_version;
       vip_apply_bp(HARD_RESTART_ON_BP && seen > 0, bp_mode, bp_low_min, bp_low_max,
                    bp_high_min, bp_high_max);
+      if (dbg) dbg_line($sformatf("backpressure applied to VIP driver: %s",
+                                  bp_str(bp_mode, bp_low_min, bp_low_max,
+                                         bp_high_min, bp_high_max)));
     end
   endtask
 
@@ -377,6 +452,7 @@ module axis_vip_dpi_slv #(
       vip_get_beat(b);
       rx_q.push_back(b);
       rx_count <= rx_q.size();
+      if (dbg) dbg_line($sformatf("from VIP monitor: %s (rx_q=%0d)", beat_str(b), rx_q.size()));
     end
   endtask
 
@@ -385,6 +461,8 @@ module axis_vip_dpi_slv #(
                                 int'(HAS_TSTRB), int'(HAS_TLAST),
                                 ID_W, DEST_W, USER_W);
     if (inst < 0) $fatal(1, "axis_vip_dpi_slv %s: register failed", NAME);
+    dbg = axis_dpi_debug() != 0;
+    if (dbg) dbg_line($sformatf("registered as inst %0d", inst));
     agent = new(NAME, `AXIS_SLV_VIF);
     agent.set_agent_tag(NAME);
     agent.start_slave();

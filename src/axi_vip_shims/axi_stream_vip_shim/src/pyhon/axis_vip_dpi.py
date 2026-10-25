@@ -24,8 +24,14 @@ There is no timeout argument: wrap with cocotb.triggers.with_timeout().
 
 The library must be the same file the simulator loads with -sv_lib. Point
 AXIS_DPI_LIB at it (the Makefile does), or pass lib_path=.
+
+Debug log: AXIS_DPI_DEBUG=1 makes all three layers log every call -- this
+module (logger "cocotb.axis_vip_dpi.<name>", set to DEBUG), the C library and
+the SV shims -- so one transfer can be followed cocotb -> DPI -> SV -> VIP.
+COCOTB_LOG_LEVEL=DEBUG alone enables only the Python lines.
 """
 import ctypes
+import logging
 import os
 from collections import namedtuple
 from ctypes import POINTER, byref, c_char_p, c_int, c_void_p
@@ -83,6 +89,7 @@ def load_lib(lib_path=None):
     proto("axis_dpi_rx_pop", c_int, c_int, c_void_p, c_int, c_void_p, c_int,
           c_void_p, c_int, c_void_p, c_int, ip, ip, ip)
     proto("axis_dpi_bp_set", c_int, c_int, c_int, c_int, c_int, c_int, c_int)
+    proto("axis_dpi_debug", c_int)
     # called by the SV shim in a real simulation; declared so the unit test can
     # play the shim
     proto("axis_dpi_sv_register", c_int, c_char_p, *cfg8)
@@ -139,11 +146,16 @@ class _AxisVip:
                      int(self.has_tstrb), int(self.has_tlast),
                      tid_width, tdest_width, tuser_width)
         self._lib = load_lib(lib_path)
+        self._log = logging.getLogger(f"cocotb.axis_vip_dpi.{name}")
+        if self._lib.axis_dpi_debug():
+            self._log.setLevel(logging.DEBUG)
         self._inst = self._lib.axis_dpi_open(name.encode())
         if self._inst < 0:
             raise RuntimeError(f"axis_dpi_open({name!r}) failed (table full?)")
         self._lib.axis_dpi_py_config(self._inst, *self._cfg)
         self._verified = False
+        self._log.debug("created: inst %d, %s", self._inst, ", ".join(
+            f"{f}={v}" for f, v in zip(_CFG_FIELDS, self._cfg)))
 
     def _verify(self):
         """Python description == SV shim parameters? Runs once, on first use
@@ -166,7 +178,26 @@ class _AxisVip:
             raise RuntimeError(
                 f"{self.name!r}: constructor does not match the SV shim -- "
                 + "; ".join(diffs))
+        self._log.debug("constructor matches the SV shim")
         self._verified = True
+
+    def _fmt_beat(self, **fields):
+        """Debug text of one transfer: the given (present) signals, vectors in
+        hex padded to their width, bytes as the little-endian number."""
+        digits = {"tdata": self.nbytes * 2, "tkeep": (self.nbytes + 3) // 4,
+                  "tstrb": (self.nbytes + 3) // 4,
+                  "tuser": (self.tuser_width + 3) // 4}
+        out = []
+        for k, v in fields.items():
+            if v is None:
+                continue
+            if isinstance(v, (bytes, bytearray)):
+                v = int.from_bytes(v, "little")
+            if k in digits:
+                out.append(f"{k}=0x{v:0{digits[k]}x}")
+            else:
+                out.append(f"{k}={int(v)}")
+        return " ".join(out)
 
     async def _status_change(self):
         """Wait for the shim's status signal to change.
@@ -185,6 +216,7 @@ class _AxisVip:
         """Drop transfers queued in the shim but not yet taken by the VIP
         (master) / not yet read by cocotb (slave)."""
         self._verify()
+        self._log.debug("flush")
         rc = self._lib.axis_dpi_flush(self._inst)
         if rc != 0:
             raise RuntimeError(f"{self.name}: flush failed ({rc})")
@@ -263,6 +295,10 @@ class AXIS_MASTER_VIP(_AxisVip):
                   if self.tdest_width else 0)
 
         self._verify()
+        if self._log.isEnabledFor(logging.DEBUG):
+            self._log.debug("put %s", self._fmt_beat(
+                tdata=tdata, tkeep=tkeep, tstrb=tstrb, tlast=tlast, tid=tid,
+                tdest=tdest, tuser=tuser, delay=delay))
         rc = self._lib.axis_dpi_tx_push(
             self._inst, data_b, len(data_b), keep_b, len(keep_b),
             strb_b, len(strb_b), user_b, len(user_b),
@@ -282,6 +318,7 @@ class AXIS_MASTER_VIP(_AxisVip):
         # `outstanding` is updated in the NBA region: let a put_transaction()
         # from this same time step show up first.
         await ReadOnly()
+        self._log.debug("wait_idle: %d outstanding", self.outstanding)
         if self.outstanding == 0:
             # Don't hand ReadOnly back to the caller: it could not drive
             # signals or call into the shims, nor wait_idle() again.
@@ -289,6 +326,7 @@ class AXIS_MASTER_VIP(_AxisVip):
             return
         while self.outstanding > 0:
             await self._status_change()             # ends outside ReadOnly
+        self._log.debug("wait_idle: done")
 
 
 # --------------------------------------------------------------------- slave
@@ -312,6 +350,7 @@ class AXIS_SLAVE_VIP(_AxisVip):
             raise ValueError(f"mode must be one of {sorted(_BP_MODES)}")
         lo = (low, low) if isinstance(low, int) else tuple(low)
         hi = (high, high) if isinstance(high, int) else tuple(high)
+        self._log.debug("set_backpressure %s low=%s high=%s", mode, lo, hi)
         rc = self._lib.axis_dpi_bp_set(self._inst, _BP_MODES[mode],
                                        lo[0], lo[1], hi[0], hi[1])
         if rc == -2:
@@ -348,11 +387,12 @@ class AXIS_SLAVE_VIP(_AxisVip):
             user, ub if self.tuser_width else 0,
             byref(last), byref(tid), byref(dest))
         if rc == 0:
+            self._log.debug("get: nothing received yet")
             return None
         if rc < 0:
             raise RuntimeError(f"{self.name}: get_transaction failed ({rc})")
         le = lambda b, n: int.from_bytes(b.raw[:n], "little")   # noqa: E731
-        return Transaction(
+        t = Transaction(
             tdata=le(data, nb),
             tkeep=le(keep, kb) if self.has_tkeep else None,
             tstrb=le(strb, kb) if self.has_tstrb else None,
@@ -361,6 +401,9 @@ class AXIS_SLAVE_VIP(_AxisVip):
             tdest=dest.value if self.tdest_width else None,
             tuser=le(user, ub) if self.tuser_width else None,
         )
+        if self._log.isEnabledFor(logging.DEBUG):
+            self._log.debug("get %s", self._fmt_beat(**t._asdict()))
+        return t
 
     async def get_transaction(self):
         """Wait for the next transfer and return it as a Transaction."""

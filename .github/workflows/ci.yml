@@ -161,7 +161,11 @@ jobs:
       # ------------------------------------------------------------ tests
       # test_flush_slave is a known failure on Verilator (see README), so it
       # is deselected to keep the job meaningful; drop that line once fixed.
+      # Debug log on (cocotb -> DPI -> SV, see "Debug log" in README.md), so a
+      # failure can be followed in the uploaded logs. Not for the benchmark.
       - name: Functional tests on Verilator
+        env:
+          AXIS_DPI_DEBUG: "1"
         run: |
           .venv/bin/python -m pytest -v \
             "$TEST_DIR/python/test_axis_vip_verilator_runner.py" \
