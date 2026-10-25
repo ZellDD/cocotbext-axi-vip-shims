@@ -5,8 +5,29 @@
 >    Standard disclaimer applies: it works on my machine, edge cases may be ignored, and architectural decisions were made based on vibes.
 >    You are completely free to use, fork, extend, modify, or break it for your own purposes. No warranties provided, but PRs and feedback are welcome!
 
-
-
+> [!NOTE]
+> **Motivation**
+>
+> I really like verifying with cocotb:
+>
+> - **Golden models are easy to write**, especially for signal processing and
+>   complex algorithms, with Python libraries such as NumPy and SciPy.
+> - **It runs inside pytest, so you control every step**:
+>   - a pre-test routine that compiles the sources your way,
+>   - a post-test routine for coverage analysis and the like,
+>   - all of it vendor independent.
+>
+> Modern FPGA development relies heavily on interfaces. In professional work
+> especially, you need to be sure your protocols, namely AXI4 (Stream, Lite and
+> Full), are implemented correctly. So far the usual approach has been AXI
+> drivers written in cocotb. In my experience those work, but I'm never sure
+> they are always correct. For professional designs I think a better approach is
+> a Python/cocotb front-end class that talks over a DPI-C interface to a
+> top-level testbench holding the DUT and the Xilinx AXI VIP cores.
+>
+> Also, when you simulate large stimulus sets, you want as few calls between
+> cocotb and the simulator as possible. Queue-based C interfacing can then make
+> the simulation run faster in real time (see [Benchmark](#benchmark)).
 
 Drive the Xilinx AXI VIPs from [cocotb](https://www.cocotb.org/) through thin
 SystemVerilog + DPI-C shims.
@@ -25,9 +46,74 @@ Currently supported:
 
 ## How it works
 
+```mermaid
+flowchart LR
+    subgraph PY["cocotb (Python)"]
+        MST["AXIS_MASTER_VIP<br/>put_transaction() · flush()<br/>wait_idle()"]
+        SLV["AXIS_SLAVE_VIP<br/>get_transaction() · set_backpressure()<br/>flush()"]
+    end
+
+    subgraph C["libaxis_dpi.so (DPI-C trampoline)"]
+        TBL["name → shim instance table<br/>byte ⇄ 4096-bit vector packing<br/>svSetScope(instance)"]
+    end
+
+    subgraph SV["SystemVerilog shims"]
+        subgraph SHM["axis_vip_dpi_mst"]
+            TXQ[("tx_q")]
+            FEED["feeder"]
+            OUT["outstanding"]
+        end
+        subgraph SHS["axis_vip_dpi_slv"]
+            RXQ[("rx_q")]
+            COLL["collector"]
+            CNT["rx_count"]
+        end
+    end
+
+    subgraph VIP["Xilinx AXI4-Stream VIP"]
+        MDRV["master agent / driver"]
+        SMON["slave agent / monitor<br/>+ TREADY generator"]
+    end
+
+    DUT["DUT / AXI4-Stream bus"]
+
+    MST -- "ctypes" --> TBL
+    SLV -- "ctypes" --> TBL
+    TBL -- "axis_mst_push / flush<br/>(DPI export)" --> TXQ
+    TBL -- "axis_slv_pop / set_bp / flush<br/>(DPI export)" --> RXQ
+    TXQ --> FEED --> MDRV --> DUT
+    DUT --> SMON --> COLL --> RXQ
+    SHM -. "register at start<br/>(DPI import)" .-> TBL
+    SHS -. "register at start<br/>(DPI import)" .-> TBL
+    OUT -. "value change" .-> MST
+    CNT -. "value change" .-> SLV
 ```
-master:  cocotb ──ctypes──> libaxis_dpi.so ──DPI export──> tx_q ──> VIP master driver ──> DUT
-slave :  DUT ──> VIP slave monitor ──> rx_q ──DPI export──> libaxis_dpi.so ──ctypes──> cocotb
+
+Solid arrows carry data. Dotted arrows are the one-time registration and the
+status signals that cocotb waits on.
+
+One transfer, from `put_transaction()` to `get_transaction()`:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant M as AXIS_MASTER_VIP
+    participant C as libaxis_dpi.so
+    participant Mst as axis_vip_dpi_mst
+    participant VIP as VIP master → bus → VIP slave
+    participant Slv as axis_vip_dpi_slv
+    participant S as AXIS_SLAVE_VIP
+
+    Note over Mst,Slv: time 0: each shim calls axis_dpi_sv_register(NAME, …)<br/>and C stores its svScope under NAME
+    M->>C: axis_dpi_tx_push(inst, bytes…) via ctypes
+    C->>Mst: svSetScope(mst) + axis_mst_push(vectors)
+    Mst-->>M: returns at once (no sim time)<br/>outstanding <= +1 (NBA)
+    Mst->>VIP: feeder pops tx_q, sends beat
+    VIP->>Slv: monitor sees handshake, collector pushes rx_q
+    Slv-->>S: rx_count <= +1 (NBA) wakes get_transaction()
+    S->>C: axis_dpi_rx_pop(inst) via ctypes
+    C->>Slv: svSetScope(slv) + axis_slv_pop()
+    Slv-->>S: Transaction(tdata, tkeep, …)
 ```
 
 - **SystemVerilog shim** ([axis_vip_dpi.sv](src/axi_vip_shims/axi_stream_vip_shim/src/hdl/axis_vip_dpi.sv)):
@@ -65,14 +151,23 @@ src/axi_vip_shims/axi_stream_vip_shim/
 test/axi_vip_shims/axi_stream_vip_shims/
   hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
   hdl/gen_vip.tcl                generates the two VIP cores in Vivado batch mode
-  python/test_axis_vip.py        functional cocotb tests, one per AXI4-Stream option
-  python/test_axis_benchmark.py  benchmark: VIP shims vs cocotbext-axi
-  python/test_questa_runner.py   builds and runs the two files above on Questa
+  hdl/verilator/axi4stream_vip_axi4streampc_stub.sv
+                                 no-check stand-in for the VIP protocol checker (Verilator only)
+  test_cases/test_axis_vip.py    functional cocotb tests, one per AXI4-Stream option
+  test_cases/test_axis_benchmark.py  benchmark: VIP shims vs cocotbext-axi
+  python/questa_common.py        shared Questa flow: VIP sources, build, run
+  python/test_axis_vip_runner.py runs test_cases/test_axis_vip.py on Questa
+  python/test_axis_benchmark_runner.py  runs test_cases/test_axis_benchmark.py on Questa
+  python/verilator_common.py     shared Verilator flow (reuses the VIP source discovery above)
+  python/test_axis_vip_verilator_runner.py        test_axis_vip.py on Verilator
+  python/test_axis_benchmark_verilator_runner.py  test_axis_benchmark.py on Verilator
   python/test_c_side.py          simulator-free test of the C + Python layers
   dpi_c/test_c_side_mock.c       mock simulator/SV side for test_c_side.py
-  artifacts/logs, artifacts/wlf  per-test logs and Questa waveforms (generated)
+  artifacts/logs                 per-test logs, Verilator ones under logs/verilator (generated)
+  artifacts/wlf, artifacts/vcd   Questa / Verilator waveforms (generated)
 lib/                             built shared libraries (generated)
-build/                           CMake build, generated VIP cores, Questa work library
+build/                           CMake build, generated VIP cores, Questa work library,
+                                 Verilator model (build/sim_build_verilator)
 ```
 
 ## Requirements
@@ -81,11 +176,13 @@ build/                           CMake build, generated VIP cores, Questa work l
   customised for your interface. For the test bench,
   [gen_vip.tcl](test/axi_vip_shims/axi_stream_vip_shims/hdl/gen_vip.tcl)
   generates them in Vivado batch mode.
-- A simulator that supports DPI-C and that cocotb can drive. Tested with
-  Questa Altera Starter FPGA Edition 2025.2 (see [Questa notes](#questa-notes)).
-  The simulator must handle the Xilinx VIP's SystemVerilog classes, so GHDL
-  (VHDL only) and Verilator don't work (see
-  [Other simulators](#other-simulators)).
+- A simulator that supports DPI-C and that cocotb can drive, and that handles
+  the Xilinx VIP's SystemVerilog classes. Tested with:
+  - Questa Altera Starter FPGA Edition 2025.2 (see [Questa notes](#questa-notes)),
+  - Verilator 5.052 (see [Verilator notes](#verilator-notes)). Verilator
+    5.032 can't build the bench.
+
+  GHDL (VHDL only) doesn't work (see [Other simulators](#other-simulators)).
 - Python 3 and cocotb.
 - A C99 compiler and CMake ≥ 3.16.
 
@@ -152,7 +249,8 @@ Slave-only parameters:
 ### 2. Load the library in both places
 
 - Simulator: `-sv_lib /path/to/lib/libaxis_dpi` (or your simulator's
-  equivalent).
+  equivalent). Verilator has no `-sv_lib`: link the `.so` into the model
+  instead (see [Verilator notes](#verilator-notes)).
 - cocotb: `AXIS_DPI_LIB=/path/to/lib/libaxis_dpi.so`, or pass
   `lib_path=` to the constructor.
 
@@ -230,7 +328,7 @@ TKEEP=0. Pass both.
   pytest      # from the repo root
   ```
 
-- **Full simulation** ([test_axis_vip.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip.py)):
+- **Full simulation** ([test_axis_vip.py](test/axi_vip_shims/axi_stream_vip_shims/test_cases/test_axis_vip.py)):
   runs against [tb_top.sv](test/axi_vip_shims/axi_stream_vip_shims/hdl/tb_top.sv),
   a VIP master → VIP slave loopback. There is one test per AXI4-Stream
   option: TDATA, TKEEP, TSTRB, TLAST, TID, TDEST, TUSER, `delay`, each
@@ -238,11 +336,11 @@ TKEEP=0. Pass both.
   `flush()`, `wait_idle()`, argument checking and constructor mismatch
   detection. A monitor on the bus wires checks delays and backpressure by the
   cycle. The tests are started by
-  [test_questa_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py),
+  [test_axis_vip_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_runner.py),
   which generates the VIP cores into `build/ip/` on first run:
 
   ```sh
-  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py
+  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_runner.py
   ```
 
   It finds Vivado through `XILINX_VIVADO` or `vivado` on `PATH`. Each cocotb
@@ -253,6 +351,27 @@ TKEEP=0. Pass both.
   `vsim -view <path>/artifacts/wlf/test_tdata.wlf`. Set `WAVES=0` to
   skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
   test. `./install.sh` builds everything and runs both test sets.
+
+- **Full simulation on Verilator**
+  ([test_axis_vip_verilator_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py)):
+  the same tests and VIP sources, built into one Verilator model under
+  `build/sim_build_verilator/`:
+
+  ```sh
+  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py
+  pytest test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py
+  ```
+
+  Under pytest it is skipped when `verilator` is not on `PATH`. Each cocotb
+  test runs in its own model run. Logs go to `artifacts/logs/verilator/`
+  (`build.log`, `<test>.log`) and waveforms to `artifacts/vcd/<test>.vcd`
+  (view with GTKWave or Surfer). `WAVES=0`, `GUI=1` (opens GTKWave after one
+  run of all selected tests) and `TESTCASE=<a>,<b>` work as on Questa. Waves
+  are a build-time option in Verilator, so `WAVES=0` builds the model without
+  tracing.
+
+  With Verilator 5.052, 18 of the 19 tests pass. `test_flush_slave` fails:
+  five cycles after `wait_idle()`, `pending` shows 4 beats instead of 5.
 
 ### Using your own VIP sources
 
@@ -289,18 +408,21 @@ so they can be adapted. Only Vivado 2025.2 has been tested.
 
 ### Benchmark
 
-[test_axis_benchmark.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark.py)
+[test_axis_benchmark.py](test/axi_vip_shims/axi_stream_vip_shims/test_cases/test_axis_benchmark.py)
 pushes 10,240 beats (TKEEP, TLAST, TID, TDEST, TUSER; every byte checked)
 through the VIP shims and, for comparison, through
 [cocotbext-axi](https://github.com/alexforencich/cocotbext-axi)'s
 `AxiStreamSource`/`AxiStreamSink` on a plain loopback (`bm_*` in `tb_top.sv`).
-It is opt-in and runs without waveform recording:
+It has its own runner,
+[test_axis_benchmark_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_runner.py),
+and runs without waveform recording. Under pytest it is skipped unless
+`BENCH=1` is set:
 
 ```sh
-BENCH=1 python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_questa_runner.py
+python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_runner.py
 BENCH=1 pytest -k benchmark -s           # same, through pytest
-BENCH_BEATS=50000 BENCH=1 ...            # more beats
-BENCH_REPEATS=5 BENCH=1 ...              # runs per case (default 3)
+BENCH_BEATS=50000 python3 .../test_axis_benchmark_runner.py   # more beats
+BENCH_REPEATS=5 python3 .../test_axis_benchmark_runner.py     # runs per case (default 3)
 ```
 
 Every run of every case is a fresh `vsim`. The table, with the median wall
@@ -323,6 +445,23 @@ beat can be read up to B cycles late. Most of the shim time is the Xilinx VIP
 itself, which cocotbext-axi's plain bus doesn't have, so this is a
 comparison of the two setups and not a measure of the shims' own overhead.
 
+The same benchmark runs on Verilator through
+[test_axis_benchmark_verilator_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py).
+It takes the same `BENCH_BEATS` / `BENCH_REPEATS`, always builds without
+waves, and writes its table to `artifacts/logs/verilator/benchmark.txt`:
+
+```sh
+python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py
+BENCH=1 pytest test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py -s
+```
+
+Verilator is about 10× faster in wall time than Questa Starter, and the
+pattern is the same. For 10,240 beats in 16-beat packets, cocotbext-axi takes
+about 1.4 s, the shims about 1.8 s when reading each beat as it arrives, and
+about 1.0 s with batched reads (about 1.4× faster than cocotbext-axi).
+Because the model is so fast, a fixed part of each run (start-up, cocotb)
+is a larger share: an idle run with no traffic already takes about 0.4 s.
+
 `pending` is updated in the NBA region, so right after `try_get_transaction()`
 it still shows the old count until the time step settles. Wait a simulator
 step (or any delay) before relying on it after draining.
@@ -344,23 +483,44 @@ process or of a DPI call. The Python side also leaves each status-signal
 callback (through `ReadWrite`) before waiting again. On Questa, a value-change
 wait re-armed from inside its own callback is never woken.
 
+## Verilator notes
+
+Tested with Verilator 5.052. The Verilator flow
+([verilator_common.py](test/axi_vip_shims/axi_stream_vip_shims/python/verilator_common.py))
+uses the same sources, include dirs, defines and timescale as the Questa flow,
+with these differences:
+
+- **The DPI library is linked, not loaded.** Verilator resolves DPI imports
+  when the model is linked, so `lib/libaxis_dpi.so` goes on the Verilator
+  command line, with an rpath to `lib/`. cocotb then opens the same file
+  through `AXIS_DPI_LIB` and gets the copy that is already loaded, so both
+  sides still share one instance table. Rebuild the model after rebuilding
+  the library.
+- **No protocol checks.** The VIP's protocol checker
+  (`axi4stream_vip_axi4streampc.sv`) crashes Verilator: its `tri0`/`tri1`
+  ports, on an interface nested in the parameterized `axi4stream_vip_if` and
+  fed from tri-stated nets, cause an internal fault, and its SVA uses
+  `##[m:n]` sequences. The flow swaps in
+  [a stub](test/axi_vip_shims/axi_stream_vip_shims/hdl/verilator/axi4stream_vip_axi4streampc_stub.sv)
+  with the same parameters and ports and no checks. AXI4-Stream protocol
+  violations are therefore only reported on Questa.
+- **Unused VIP files are left out.** `axi_vip_pkg.sv`, `axi_vip_if.sv`,
+  `axi_vip_axi4pc.sv`, `clk_vip_if.sv` and `rst_vip_if.sv` are compiled by
+  Questa but not needed for AXI4-Stream, and Verilator rejects
+  `axi_vip_pkg.sv`.
+- **Build flags:** `--timing` (the VIP drivers use `#` and `@` delays) and
+  `-Wno-fatal -Wno-lint -Wno-style`. The build log shows `MULTIDRIVEN`
+  warnings from `axi4stream_vip_if.sv` (clocking block and continuous
+  assignment on the same signals); they come from the Xilinx code and don't
+  stop the build.
+- `+define+XIL_DO_NOT_USE_ADV_RANDOMIZATION` is set as on Questa. Here it
+  also keeps the VIP off Verilator's limited `randomize()` support.
+
+Verilator 5.032 can't build the bench: besides the checker, it rejects VIP
+methods called without parentheses (`this.get_data_width`) and crashes on the
+VIP's interface reached by hierarchical path (`tb_top.mst_vip.inst.IF`).
+
 ## Other simulators
 
 - **GHDL** simulates VHDL only. The Xilinx VIP and the shims are
   SystemVerilog, and the C side is reached through SystemVerilog DPI-C.
-- **Verilator** (tried with 5.032) can't build the test bench:
-  - The VIP's protocol checker (`axi4stream_vip_axi4streampc`) is written in
-    SVA with `##[m:n]` sequences, which Verilator doesn't support. The VIP
-    interface instantiates the checker unconditionally.
-  - The VIP package calls some methods without parentheses
-    (`this.get_data_width`, `this.get_verbosity`), which Verilator rejects.
-  - The blocker: the shims hand the VIP its interface through a hierarchical
-    path (`tb_top.mst_vip.inst.IF`), as Xilinx's examples do. Verilator 5.032
-    crashes with an internal fault on a parameterized interface passed to a
-    virtual interface by hierarchical path. A 30-line example reproduces it.
-    The first two problems can be worked around (a stub checker, a patched
-    copy of the package); this one would need changes to Xilinx's code.
-
-  A newer Verilator might get further, but even then it is untested whether
-  the VIP's class-based driver, monitor and mailboxes, and the DPI calls from
-  cocotb callbacks, work there.
