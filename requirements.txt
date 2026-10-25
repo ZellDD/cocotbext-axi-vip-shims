@@ -1,4 +1,6 @@
 cocotb>=2.0
 pytest
+pytest-cov>=7    # Python coverage, see pytest.ini
+gcovr            # C coverage of axis_dpi.cpp, see conftest.py
 cocotbext-axi    # benchmark comparison only
 pre-commit       # git hooks, see .pre-commit-config.yaml

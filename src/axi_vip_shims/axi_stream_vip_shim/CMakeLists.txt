@@ -21,4 +21,11 @@ axis_dpi_lib(axis_dpi ${AXIS_DPI_SRC})
 if(AXI_VIP_SHIMS_BUILD_TEST_LIBS)
     axis_dpi_lib(axis_dpi_test ${AXIS_DPI_SRC}
                  ${AXI_VIP_SHIMS_TEST_DIR}/axi_vip_shims/axi_stream_vip_shims/dpi_c/test_c_side_mock.c)
+    # gcov counters for the C side; conftest.py reports them with gcovr.
+    # Only the test library: libaxis_dpi.so stays uninstrumented.
+    if(AXI_VIP_SHIMS_TEST_COVERAGE)
+        target_compile_options(axis_dpi_test PRIVATE --coverage -O0)
+        target_link_options(axis_dpi_test PRIVATE --coverage)
+        target_compile_definitions(axis_dpi_test PRIVATE AXIS_DPI_MOCK_COVERAGE)
+    endif()
 endif()

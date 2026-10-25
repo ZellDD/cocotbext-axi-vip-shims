@@ -143,11 +143,13 @@ CMakeLists.txt, src/CMakeLists.txt
 install.sh                       venv + build + tests in one go
 Makefile                         make / make test / make clean
 requirements.txt, conftest.py
+pytest.ini, .coveragerc          coverage on every pytest run (see [Coverage](#coverage))
 src/axi_vip_shims/axi_stream_vip_shim/
   CMakeLists.txt
   src/hdl/axis_vip_dpi.sv        SV shims (master + slave)
   src/dpi_c/axis_dpi.cpp         DPI-C trampoline
   src/pyhon/axis_vip_dpi.py      cocotb classes
+examples/axis_byteswap/          standalone project using the shims (see [Examples](#examples))
 test/axi_vip_shims/axi_stream_vip_shims/
   hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
   hdl/gen_vip.tcl                generates the two VIP cores in Vivado batch mode
@@ -196,6 +198,8 @@ This produces:
 - `libaxis_dpi.so`: load it in the simulator and in cocotb.
 - `libaxis_dpi_test.so`: `axis_dpi.cpp` linked with the mock. Used only by the
   simulator-free test. Disable it with `-DAXI_VIP_SHIMS_BUILD_TEST_LIBS=OFF`.
+  It is built with `--coverage` (see [Coverage](#coverage)); turn that off with
+  `-DAXI_VIP_SHIMS_TEST_COVERAGE=OFF`. `libaxis_dpi.so` is never instrumented.
 
 Both land in the top-level `lib/` (set by `AXI_VIP_SHIMS_LIB_DIR`).
 
@@ -277,6 +281,19 @@ await mst.wait_idle()
 The constructor describes the interface. On first use, the description is
 checked against the shim's parameters and any mismatch is reported field by
 field. You can call `check()` to run that check early.
+
+## Examples
+
+[examples/axis_byteswap/](examples/axis_byteswap/) is a small standalone
+project that tests its own DUT through the shims. It is laid out like a
+separate repository that has the shims as a git submodule. It shows how to
+build `libaxis_dpi.so` from your own CMake (`add_subdirectory`), how to compile
+the VIP and shim sources with your bench, how to override the shim macros for
+your VIP component names, and how to run the bench on Verilator and on Questa:
+
+```sh
+cd examples/axis_byteswap && pytest    # SIM=questa pytest for Questa
+```
 
 ## API summary
 
@@ -403,6 +420,31 @@ variable unset, each log point costs one flag test.
 
   With Verilator 5.052, 18 of the 19 tests pass. `test_flush_slave` fails:
   five cycles after `wait_idle()`, `pending` shows 4 beats instead of 5.
+
+### Coverage
+
+Every `pytest` run from the repo root reports coverage of the cocotb front end
+and of the C trampoline, at the end of the run:
+
+- **Python** (`axis_vip_dpi.py`), with pytest-cov
+  ([pytest.ini](pytest.ini), [.coveragerc](.coveragerc)). It is measured in
+  the simulator-free test, and also inside the simulator during the
+  simulation tests (`patch = subprocess`). The numbers from both are
+  combined. HTML report: `build/coverage/python/index.html`.
+- **C** (`axis_dpi.cpp`), with gcov and gcovr. `lib/libaxis_dpi_test.so` is
+  built with `--coverage`, so only the simulator-free test contributes. The
+  library a simulator loads is not instrumented. [conftest.py](conftest.py)
+  resets the counters when the session starts and prints the gcovr table at
+  the end. HTML report: `build/coverage/c/index.html`.
+
+Both also write a Cobertura XML report (`build/coverage/{python,c}/coverage.xml`)
+for tools such as Codecov or an IDE coverage view. CI uploads `build/coverage/`
+as an artifact: `coverage-unit-py<version>` from the simulator-free job, and
+`coverage-verilator` (Python only, measured inside the simulator) from the
+Verilator job.
+
+The SV shims aren't measured here. For HDL code coverage of your own DUT,
+see the [example](examples/axis_byteswap/README.md#coverage).
 
 ### Test artifacts
 

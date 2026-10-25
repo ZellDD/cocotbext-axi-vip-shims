@@ -1,0 +1,13 @@
+# Python coverage for pytest (see pytest.ini): the cocotb front end,
+# axis_vip_dpi.py. It runs in-process in the simulator-free test
+# (test_c_side.py), and inside the simulator under the simulator runners:
+# `patch = subprocess` measures there too, and pytest-cov combines both.
+[run]
+source = src/axi_vip_shims/axi_stream_vip_shim/src/pyhon
+data_file = build/.coverage
+patch = subprocess
+# a run with no simulator test and no test_c_side.py collects nothing
+disable_warnings = no-data-collected, module-not-imported
+
+[report]
+skip_empty = true

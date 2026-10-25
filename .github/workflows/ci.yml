@@ -72,6 +72,17 @@ jobs:
       - name: Library exports
         run: nm -D --defined-only lib/libaxis_dpi.so | grep ' T axis_dpi_'
 
+      # Python (pytest-cov) and C (gcovr) coverage of the simulator-free
+      # tests, HTML + Cobertura XML (see "Coverage" in README.md)
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-unit-py${{ matrix.python }}
+          path: build/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Secrets can't be tested in a job-level `if`, so this job reports whether
   # the VIP sources are available.
   vip-secret:
@@ -182,8 +193,18 @@ jobs:
           { echo "### Verilator benchmark"; echo '```'; cat "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       # -------------------------------------------------------- artifacts
-      # Logs and benchmark tables only. The VIP sources stay in RUNNER_TEMP,
-      # and build/ (with the patched checker copy) is not uploaded.
+      # Logs, benchmark tables and coverage reports only. The VIP sources stay
+      # in RUNNER_TEMP, and the rest of build/ (with the patched checker copy)
+      # is not uploaded.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-verilator
+          path: build/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v7

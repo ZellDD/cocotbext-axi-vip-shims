@@ -149,3 +149,11 @@ void mock_slv_bp(void *sc, int *out)
     out[0] = m->bp_mode; out[1] = m->lmin; out[2] = m->lmax;
     out[3] = m->hmin; out[4] = m->hmax; out[5] = m->bp_version;
 }
+
+#ifdef AXIS_DPI_MOCK_COVERAGE
+/* Built with --coverage (AXI_VIP_SHIMS_TEST_COVERAGE): write the .gcda
+ * counters now. They are otherwise written when the process exits, i.e.
+ * after pytest has printed its report (see conftest.py). */
+void __gcov_dump(void);
+void mock_gcov_dump(void) { __gcov_dump(); }
+#endif
