@@ -1,3 +1,4 @@
 cocotb>=2.0
 pytest
 cocotbext-axi    # benchmark comparison only
+pre-commit       # git hooks, see .pre-commit-config.yaml

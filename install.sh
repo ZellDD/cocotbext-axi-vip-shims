@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Set up the Python venv, build the DPI-C libraries into lib/, run the tests.
+# Set up the Python venv and pre-commit hooks, build the DPI-C libraries into
+# lib/, run the tests.
 #
 #   ./install.sh                    venv + build + tests
 #   ./install.sh --no-tests         venv + build only
@@ -21,7 +22,7 @@ while [ $# -gt 0 ]; do
         --vip-src)   [ $# -ge 2 ] || { echo "--vip-src needs a path" >&2; exit 2; }
                      AXIS_VIP_SRC=$2; shift ;;
         --vip-src=*) AXIS_VIP_SRC=${1#--vip-src=} ;;
-        -h|--help)   sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)   sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)           echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -50,6 +51,14 @@ PY=.venv/bin/python
 "$PY" -m pip install --quiet --upgrade pip
 "$PY" -m pip install --quiet -r requirements.txt
 "$PY" -c 'import cocotb; print("  cocotb", cocotb.__version__)'
+
+# ---------------------------------------------------------------- git hooks
+step "pre-commit hooks"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    .venv/bin/pre-commit install
+else
+    echo "  not a git checkout: skipped"
+fi
 
 # ---------------------------------------------------------------- build
 step "Building DPI-C libraries"

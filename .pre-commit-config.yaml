@@ -1,5 +1,30 @@
+# Install once per clone:  .venv/bin/pip install pre-commit && .venv/bin/pre-commit install
+# Run on everything:       .venv/bin/pre-commit run --all-files
+# Bump hook versions:      .venv/bin/pre-commit autoupdate
 repos:
+  # Secrets (API keys, tokens, private keys) in staged changes
   - repo: https://github.com/betterleaks/betterleaks
-    rev: v1.9.0 # Replace with the latest version tag
+    rev: v1.9.0
     hooks:
       - id: betterleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files      # also stops a build/*.b64 VIP blob
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # Xilinx VIP sources must never be committed (see scripts/pack_vip_secret.sh)
+  - repo: local
+    hooks:
+      - id: no-vip-sources
+        name: no Xilinx VIP sources
+        language: fail
+        entry: Xilinx VIP sources must not be committed
+        files: '(\.b64|\.txz|axi4stream_vip_.*\.sv|xil_common_vip_pkg\.sv)$'
+        exclude: '^src/'
