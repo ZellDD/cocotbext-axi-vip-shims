@@ -1,7 +1,7 @@
 """Shared Questa / ModelSim flow for the cocotb runners next to this file:
 
-    test_axis_vip_runner.py        functional tests  (../test_cases/test_axis_vip.py)
-    test_axis_benchmark_runner.py  benchmark         (../test_cases/test_axis_benchmark.py)
+    test_axis_vip_questa_runner.py  functional tests  (../test_cases/test_axis_vip.py)
+    test_axis_benchmark_runner.py   benchmark         (../test_cases/test_axis_benchmark.py)
 
 Compiles the Xilinx VIP sources from the Vivado install, the generated VIP
 cores (made by hdl/gen_vip.tcl on first run), the DPI shims and tb_top.sv into

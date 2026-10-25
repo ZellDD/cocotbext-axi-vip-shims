@@ -7,7 +7,7 @@
 #                                   Vivado: a directory or a .f file list (see
 #                                   AXIS_VIP_SRC in questa_common.py)
 #
-# The Questa simulation tests (test_axis_vip_runner.py) run only when vsim is on PATH
+# The Questa simulation tests (test_axis_vip_questa_runner.py) run only when vsim is on PATH
 # and VIP sources are available: --vip-src, or Vivado (XILINX_VIVADO, or
 # vivado on PATH), from which it generates the VIP cores into build/ip.
 set -euo pipefail
@@ -73,9 +73,9 @@ else
 fi
 if [ -n "${SKIP_WHY:-}" ]; then
     echo "  skipping the Questa simulation test: $SKIP_WHY"
-    PYTEST_ARGS+=(--deselect
-        test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_runner.py
-        test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_runner.py)
+    PYTEST_ARGS+=(
+        --deselect test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_questa_runner.py
+        --deselect test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_runner.py)
 fi
 "$PY" -m pytest "${PYTEST_ARGS[@]}"
 

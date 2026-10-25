@@ -1,9 +1,9 @@
 """Runner for the functional tests in ../test_cases/test_axis_vip.py on Questa.
 
 Every cocotb test runs in its own vsim, with its own log and waveform, all in
-artifacts/test_axis_vip_runner/ (build.log, logs/<test>.log, wlf/<test>.wlf):
+artifacts/test_axis_vip_questa_runner/ (build.log, logs/<test>.log, wlf/<test>.wlf):
 
-    python3 test_axis_vip_runner.py     (or: pytest test_axis_vip_runner.py)
+    python3 test_axis_vip_questa_runner.py     (or: pytest test_axis_vip_questa_runner.py)
 
 Environment (plus the shared ones in questa_common.py):
     WAVES=0          don't record waves (default: every test is recorded into

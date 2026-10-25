@@ -1,6 +1,6 @@
 """Runner for the functional tests in ../test_cases/test_axis_vip.py on Verilator.
 
-Same set-up as test_axis_vip_runner.py (Questa): every cocotb test runs in its
+Same set-up as test_axis_vip_questa_runner.py (Questa): every cocotb test runs in its
 own model run, with its own log and waveform, all in
 artifacts/test_axis_vip_verilator_runner/ (build.log, logs/<test>.log,
 vcd/<test>.vcd):

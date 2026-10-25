@@ -156,7 +156,7 @@ test/axi_vip_shims/axi_stream_vip_shims/
   test_cases/test_axis_vip.py    functional cocotb tests, one per AXI4-Stream option
   test_cases/test_axis_benchmark.py  benchmark: VIP shims vs cocotbext-axi
   python/questa_common.py        shared Questa flow: VIP sources, build, run
-  python/test_axis_vip_runner.py runs test_cases/test_axis_vip.py on Questa
+  python/test_axis_vip_questa_runner.py  runs test_cases/test_axis_vip.py on Questa
   python/test_axis_benchmark_runner.py  runs test_cases/test_axis_benchmark.py on Questa
   python/verilator_common.py     shared Verilator flow (reuses the VIP source discovery above)
   python/test_axis_vip_verilator_runner.py        test_axis_vip.py on Verilator
@@ -336,17 +336,17 @@ TKEEP=0. Pass both.
   `flush()`, `wait_idle()`, argument checking and constructor mismatch
   detection. A monitor on the bus wires checks delays and backpressure by the
   cycle. The tests are started by
-  [test_axis_vip_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_runner.py),
+  [test_axis_vip_questa_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_questa_runner.py),
   which generates the VIP cores into `build/ip/` on first run:
 
   ```sh
-  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_runner.py
+  python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_questa_runner.py
   ```
 
   It finds Vivado through `XILINX_VIVADO` or `vivado` on `PATH`. Each cocotb
   test runs in its own `vsim`, with its log in
-  `artifacts/test_axis_vip_runner/logs/<test>.log` and all signals recorded
-  to `artifacts/test_axis_vip_runner/wlf/<test>.wlf` (see
+  `artifacts/test_axis_vip_questa_runner/logs/<test>.log` and all signals recorded
+  to `artifacts/test_axis_vip_questa_runner/wlf/<test>.wlf` (see
   [Test artifacts](#test-artifacts)). Open a waveform with
   `vsim -view <path>/wlf/test_tdata.wlf`. Set `WAVES=0` to
   skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
@@ -381,7 +381,7 @@ script, and only what applies to it:
 
 ```
 artifacts/
-  test_axis_vip_runner/                  build.log  logs/<test>.log  wlf/<test>.wlf
+  test_axis_vip_questa_runner/           build.log  logs/<test>.log  wlf/<test>.wlf
   test_axis_vip_verilator_runner/        build.log  logs/<test>.log  vcd/<test>.vcd
   test_axis_benchmark_runner/            build.log  logs/<test>.log  results/  benchmark.txt
   test_axis_benchmark_verilator_runner/  build.log  logs/<test>.log  results/  benchmark.txt
