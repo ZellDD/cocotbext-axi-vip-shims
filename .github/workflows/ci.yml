@@ -49,9 +49,9 @@ jobs:
       matrix:
         python: ["3.12", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -100,9 +100,9 @@ jobs:
     env:
       WAVES: "0"                     # waves off in CI; logs are uploaded
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -111,7 +111,7 @@ jobs:
       # -------------------------------------------------------- Verilator
       - name: Cache Verilator ${{ env.VERILATOR_VERSION }}
         id: verilator-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/verilator
           key: verilator-${{ env.VERILATOR_VERSION }}-ubuntu-24.04-${{ runner.arch }}
@@ -182,7 +182,7 @@ jobs:
       # and build/ (with the patched checker copy) is not uploaded.
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verilator-logs
           path: |
