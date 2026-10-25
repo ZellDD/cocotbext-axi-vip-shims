@@ -119,7 +119,7 @@ sequenceDiagram
 - **SystemVerilog shim** ([axis_vip_dpi.sv](src/axi_vip_shims/axi_stream_vip_shim/src/hdl/axis_vip_dpi.sv)):
   holds the queues and talks to the VIP agent. All VIP API calls live in
   `vip_*` tasks, so they are easy to adapt to a different Vivado version.
-- **DPI-C trampoline** ([axis_dpi.c](src/axi_vip_shims/axi_stream_vip_shim/src/dpi_c/axis_dpi.c)):
+- **DPI-C trampoline** ([axis_dpi.cpp](src/axi_vip_shims/axi_stream_vip_shim/src/dpi_c/axis_dpi.cpp)):
   a name → shim-instance table. It packs bytes into 4096-bit DPI vectors and
   calls the shim's exported functions with `svSetScope()` set to the right
   instance.
@@ -146,7 +146,7 @@ requirements.txt, conftest.py
 src/axi_vip_shims/axi_stream_vip_shim/
   CMakeLists.txt
   src/hdl/axis_vip_dpi.sv        SV shims (master + slave)
-  src/dpi_c/axis_dpi.c           DPI-C trampoline
+  src/dpi_c/axis_dpi.cpp         DPI-C trampoline
   src/pyhon/axis_vip_dpi.py      cocotb classes
 test/axi_vip_shims/axi_stream_vip_shims/
   hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
@@ -184,7 +184,7 @@ build/                           CMake build, generated VIP cores, Questa work l
 
   GHDL (VHDL only) doesn't work (see [Other simulators](#other-simulators)).
 - Python 3 and cocotb.
-- A C99 compiler and CMake ≥ 3.16.
+- A C99 and a C++17 compiler, and CMake ≥ 3.16.
 
 ## Building the DPI library
 
@@ -196,7 +196,7 @@ cmake --build build
 This produces:
 
 - `libaxis_dpi.so`: load it in the simulator and in cocotb.
-- `libaxis_dpi_test.so`: `axis_dpi.c` linked with the mock. Used only by the
+- `libaxis_dpi_test.so`: `axis_dpi.cpp` linked with the mock. Used only by the
   simulator-free test. Disable it with `-DAXI_VIP_SHIMS_BUILD_TEST_LIBS=OFF`.
 
 Both land in the top-level `lib/` (set by `AXI_VIP_SHIMS_LIB_DIR`).
@@ -318,7 +318,7 @@ TKEEP=0. Pass both.
 ## Tests
 
 - **Simulator-free** ([test_c_side.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_c_side.py)):
-  loads `lib/libaxis_dpi_test.so` (`axis_dpi.c` linked with a mock of the
+  loads `lib/libaxis_dpi_test.so` (`axis_dpi.cpp` linked with a mock of the
   simulator and SV side), then checks the C trampoline, scope handling, vector
   packing and the Python API. Build the library with CMake first. The test
   needs cocotb importable, but no simulator.

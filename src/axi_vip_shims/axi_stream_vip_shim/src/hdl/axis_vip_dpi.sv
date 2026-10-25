@@ -51,7 +51,7 @@
 
 package axis_dpi_pkg;
   // Wide signals cross DPI as fixed 4096-bit vectors; unused upper bits are 0.
-  // Keep in sync with AXIS_VEC_WORDS in axis_dpi.c.
+  // Keep in sync with VEC_WORDS in axis_dpi.cpp.
   localparam int AXIS_VEC_BITS = 4096;
   typedef bit [AXIS_VEC_BITS-1:0] axis_vec_t;
 endpackage
@@ -111,7 +111,7 @@ module axis_vip_dpi_mst #(
   // Status for cocotb (read-only there): transfers put but not yet on the bus.
   logic [31:0] outstanding = '0;
 
-  // ---------------- DPI exports (called from cocotb via axis_dpi.c) ---------
+  // ---------------- DPI exports (called from cocotb via axis_dpi.cpp) ---------
   function int axis_mst_push(input axis_vec_t data, keep, strb, user,
                              input int last, id, dest, delay);
     beat_t b;
@@ -239,7 +239,7 @@ module axis_vip_dpi_slv #(
   export "DPI-C" function axis_slv_set_bp;
   export "DPI-C" function axis_slv_flush;
 
-  localparam int BP_NONE = 0, BP_OSC = 1, BP_RANDOM = 2, BP_STALL = 3; // = axis_dpi.c
+  localparam int BP_NONE = 0, BP_OSC = 1, BP_RANDOM = 2, BP_STALL = 3; // = axis_dpi.cpp
   localparam int UW = (USER_W > 0) ? USER_W : 1;
 
   typedef struct {
@@ -265,7 +265,7 @@ module axis_vip_dpi_slv #(
   int bp_mode = BP_NONE, bp_low_min = 0, bp_low_max = 0,
       bp_high_min = 1, bp_high_max = 1;
 
-  // ---------------- DPI exports (called from cocotb via axis_dpi.c) ---------
+  // ---------------- DPI exports (called from cocotb via axis_dpi.cpp) ---------
   function int axis_slv_pop(output axis_vec_t data, keep, strb, user,
                             output int last, id, dest);
     beat_t b;

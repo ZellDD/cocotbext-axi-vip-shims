@@ -1,7 +1,7 @@
 /*
  * test_c_side_mock.c -- test double for the simulator + SV shims.
  *
- * Linked together with axis_dpi.c by test_c_side.py. It provides what a
+ * Linked together with axis_dpi.cpp by test_c_side.py. It provides what a
  * simulator would: svGetScope/svSetScope, and the exported SV functions
  * (axis_mst_push, axis_slv_pop, ...) backed by per-"scope" queues, mirroring
  * the queues in axis_vip_dpi.sv. An export called without the right scope

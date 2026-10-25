@@ -33,7 +33,7 @@ from ctypes import POINTER, byref, c_char_p, c_int, c_void_p
 from cocotb.triggers import ReadOnly, ReadWrite, Timer
 
 MAX_TDATA_BITS = 4096          # = AXIS_VEC_BITS in axis_vip_dpi.sv
-_BP_MODES = {"none": 0, "osc": 1, "random": 2, "stall": 3}   # = axis_dpi.c
+_BP_MODES = {"none": 0, "osc": 1, "random": 2, "stall": 3}   # = axis_dpi.cpp
 _ROLE_MASTER, _ROLE_SLAVE = 0, 1
 _CFG_FIELDS = ("role", "tdata_bytes", "has_tkeep", "has_tstrb", "has_tlast",
                "tid_width", "tdest_width", "tuser_width")
@@ -61,7 +61,7 @@ def load_lib(lib_path=None):
     if path in _libs:
         return _libs[path]
 
-    # loads contents of axis_dpi.c/.so
+    # loads contents of axis_dpi.cpp/.so
     lib = ctypes.CDLL(path)
     # integer pointer into the 
     ip = POINTER(c_int)
