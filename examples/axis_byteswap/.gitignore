@@ -1,0 +1,4 @@
+# Everything generated: DPI library, VIP cores, simulator builds
+build/
+__pycache__/
+results.xml
