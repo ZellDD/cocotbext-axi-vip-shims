@@ -8,7 +8,7 @@ so delays and backpressure are checked as they really happen on the bus.
 import random
 
 import cocotb
-from cocotb.triggers import ClockCycles, FallingEdge, with_timeout
+from cocotb.triggers import ClockCycles, FallingEdge, with_timeout, RisingEdge
 
 from axis_vip_dpi import AXIS_MASTER_VIP, AXIS_SLAVE_VIP
 
@@ -65,6 +65,7 @@ async def setup(dut):
     slv = AXIS_SLAVE_VIP("slv0", dut.slv_shim, **IFACE)
     mst.check()
     slv.check()
+    await RisingEdge(dut.aclk)
     return mst, slv, Bus(dut)
 
 
@@ -362,7 +363,10 @@ async def test_flush_slave(dut):
     for i in range(5):
         mst.put_transaction(tdata=i, tlast=True)
     await with_timeout(mst.wait_idle(), 100, "us")
-    await ClockCycles(dut.aclk, 5)
+    # Verilator: Value is not updated directly at the
+    # pos edge, rather 1 ps later thus 6 clk cycles are
+    # used
+    await ClockCycles(dut.aclk, 6)
     assert slv.pending == 5
     slv.flush()
     await ClockCycles(dut.aclk, 1)
