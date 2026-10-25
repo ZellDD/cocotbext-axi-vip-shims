@@ -2,7 +2,9 @@
 
 Runs every bench_* test BENCH_REPEATS times, each run in a fresh vsim and
 without waves (logging would dominate the timing), and tabulates median wall
-time and spread into artifacts/logs/benchmark.txt:
+time and spread into benchmark.txt. Everything goes to
+artifacts/test_axis_benchmark_runner/: build.log, logs/<test>.log,
+results/<test>.json (one per run, written by the test) and benchmark.txt:
 
     python3 test_axis_benchmark_runner.py
     BENCH=1 pytest test_axis_benchmark_runner.py -s    (skipped without BENCH=1)
@@ -20,23 +22,26 @@ import sys
 import pytest
 from cocotb_tools.check_results import get_results
 
-from questa_common import LOG_DIR, cocotb_tests, run_questa
+from questa_common import artifact_dir, cocotb_tests, run_questa
 
 MODULE = "test_axis_benchmark"
-BENCH_DIR = LOG_DIR / "benchmark"        # one <test>.json per run, from the test
+OUT = artifact_dir(__file__)
 
 
-def benchmark(run=run_questa, out=LOG_DIR / "benchmark.txt", sim="vsim"):
-    """Runs the cases with run(testcase, module, waves) and writes the table to
-    out; sim names the simulator in the note. Returns (table, results.xml paths)."""
+def benchmark(run=run_questa, out=OUT, sim="vsim"):
+    """Runs the cases with run(testcase, module, out, waves, env) and writes the
+    table to out/benchmark.txt; sim names the simulator in the note. Returns
+    (table, results.xml paths)."""
     repeats = int(os.environ.get("BENCH_REPEATS", 3))
-    shutil.rmtree(BENCH_DIR, ignore_errors=True)
+    result_dir = out / "results"         # one <test>.json per run, from the test
+    shutil.rmtree(result_dir, ignore_errors=True)
     xmls, runs = [], {}
     for _ in range(repeats):             # interleaved, so drift hits every case
         for t in cocotb_tests(MODULE):
-            xml = run(t, MODULE, waves=False)
+            xml = run(t, MODULE, out, waves=False,
+                      env={"BENCH_RESULT_DIR": str(result_dir)})
             xmls.append(xml)
-            f = BENCH_DIR / f"{t}.json"
+            f = result_dir / f"{t}.json"
             if f.is_file():
                 runs.setdefault(t, []).append(json.loads(f.read_text()))
                 f.unlink()
@@ -60,7 +65,7 @@ def benchmark(run=run_questa, out=LOG_DIR / "benchmark.txt", sim="vsim"):
     table = "\n".join([line(head), line("-" * w for w in widths)] + [line(b) for b in body])
     note = (f"\nmedian of {repeats} runs per case, each in a fresh {sim}; "
             "spread = (max - min) / median of the wall times\n")
-    out.write_text(table + "\n" + note)
+    (out / "benchmark.txt").write_text(table + "\n" + note)
     return table + "\n" + note, xmls
 
 
@@ -74,6 +79,6 @@ def test_benchmark():
 if __name__ == "__main__":
     table, xmls = benchmark()
     print(table)
-    print(f"\nwritten to {LOG_DIR / 'benchmark.txt'}")
+    print(f"\nwritten to {OUT / 'benchmark.txt'}")
     failed = sum(get_results(x)[1] for x in xmls)
     sys.exit(1 if failed else 0)

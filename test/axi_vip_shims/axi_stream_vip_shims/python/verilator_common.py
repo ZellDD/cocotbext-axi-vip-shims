@@ -12,9 +12,10 @@ Known not to build with Verilator 5.032, see "Other simulators" in README.md.
 Environment: AXIS_VIP_SRC, XILINX_VIVADO, AXIS_VIP_IP_DIRS, AXIS_DPI_LIB as in
 questa_common.py, and
     WAVES=0          build without --trace (waves are a build-time option in
-                     Verilator; default: on, artifacts/vcd/<test>.vcd)
+                     Verilator; default: on, artifacts/<runner>/vcd/<test>.vcd)
 
-Logs: artifacts/logs/verilator/build.log and .../<test>.log.
+Artifacts: artifacts/<runner>/ as in questa_common.py, with vcd/<test>.vcd
+instead of wlf/.
 """
 import functools
 import os
@@ -23,14 +24,13 @@ import sys
 
 from cocotb_tools.runner import get_runner
 
-from questa_common import (ARTIFACTS, LOG_DIR as QUESTA_LOG_DIR, REPO, SHIM,
-                           TEST_CASES, TEST_ROOT, TOPLEVEL, _dpi_lib,
+from questa_common import (REPO, SHIM, TEST_CASES, TEST_ROOT, TOPLEVEL, _dpi_lib,
                            _generated_sources, _user_vip_sources, _vip_sources,
-                           _vivado, cocotb_tests)  # noqa: F401  (re-exported)
+                           _vivado, artifact_dir, cocotb_tests,  # noqa: F401  (re-exported)
+                           copy_build_log)
 
 BUILD_DIR = REPO / "build" / "sim_build_verilator"
-LOG_DIR = QUESTA_LOG_DIR / "verilator"
-WAVE_DIR = ARTIFACTS / "vcd"
+BUILD_LOG = BUILD_DIR / "build.log"                        # copied into each runner's dir
 
 
 # Compiled by Questa but not used by the AXI4-Stream bench; Verilator also
@@ -79,7 +79,7 @@ def build():
         timescale=("1ns", "1ps"),
         waves=_waves(),
         always=True,
-        log_file=LOG_DIR / "build.log",
+        log_file=BUILD_LOG,
     )
 
     # The runner hands the model its own sys.path as PYTHONPATH (extra_env's
@@ -90,18 +90,21 @@ def build():
     return runner
 
 
-def run_verilator(testcase, module, waves=None):
-    """Run one cocotb test (or a list, in one model run). Its log goes to
-    artifacts/logs/verilator/<name>.log and its waves to artifacts/vcd/<name>.vcd.
-    Returns the results.xml path."""
+def run_verilator(testcase, module, out, waves=None, env=None):
+    """Run one cocotb test (or a list, in one model run). out is the runner's
+    artifact_dir(): the log goes to out/logs/<name>.log, the waves to
+    out/vcd/<name>.vcd, the build log to out/build.log. env is added to the
+    test's environment. Returns the results.xml path."""
     runner = build()
+    copy_build_log(BUILD_LOG, out)
+    log_dir, wave_dir = out / "logs", out / "vcd"
     lib = _dpi_lib()
     names = [testcase] if isinstance(testcase, str) else list(testcase)
     name = names[0] if len(names) == 1 else "tests"
     if waves is None:
         waves = _waves()
     waves = waves and _waves()                 # can't trace a model built without
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     # each run in its own dir: the model writes dump.vcd into its cwd
     test_dir = BUILD_DIR / "runs" / name
@@ -114,14 +117,14 @@ def run_verilator(testcase, module, waves=None):
             build_dir=BUILD_DIR,
             test_dir=test_dir,
             # BENCH_NAME: the benchmark names its result file after the test
-            extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name},
+            extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name, **(env or {})},
             results_xml=str(BUILD_DIR / f"{name}.results.xml"),   # pytest wants absolute
-            log_file=LOG_DIR / f"{name}.log",
+            log_file=log_dir / f"{name}.log",
             waves=waves,
             gui=os.environ.get("GUI") == "1",
         )
     finally:
         vcd = test_dir / "dump.vcd"
         if waves and vcd.is_file():
-            WAVE_DIR.mkdir(parents=True, exist_ok=True)
-            shutil.move(vcd, WAVE_DIR / f"{name}.vcd")
+            wave_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(vcd, wave_dir / f"{name}.vcd")

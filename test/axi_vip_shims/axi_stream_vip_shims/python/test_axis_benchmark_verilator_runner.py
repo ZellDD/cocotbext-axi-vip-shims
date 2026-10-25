@@ -2,7 +2,8 @@
 
 Same benchmark as test_axis_benchmark_runner.py (Questa): every bench_* test
 BENCH_REPEATS times, each run a fresh model run without waves, tabulated into
-artifacts/logs/verilator/benchmark.txt:
+benchmark.txt. Everything goes to artifacts/test_axis_benchmark_verilator_runner/
+(build.log, logs/<test>.log, results/<test>.json, benchmark.txt):
 
     python3 test_axis_benchmark_verilator_runner.py
     BENCH=1 pytest test_axis_benchmark_verilator_runner.py -s
@@ -24,14 +25,14 @@ import pytest
 from cocotb_tools.check_results import get_results
 
 from test_axis_benchmark_runner import benchmark
-from verilator_common import LOG_DIR, run_verilator
+from verilator_common import artifact_dir, run_verilator
+
+OUT = artifact_dir(__file__)
 
 
 def verilator_benchmark():
     os.environ["WAVES"] = "0"
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    return benchmark(run=run_verilator, out=LOG_DIR / "benchmark.txt",
-                     sim="Verilator model")
+    return benchmark(run=run_verilator, out=OUT, sim="Verilator model")
 
 
 # Opt-in under pytest: takes a while and measures speed rather than correctness.
@@ -45,6 +46,6 @@ def test_benchmark_verilator():
 if __name__ == "__main__":
     table, xmls = verilator_benchmark()
     print(table)
-    print(f"\nwritten to {LOG_DIR / 'benchmark.txt'}")
+    print(f"\nwritten to {OUT / 'benchmark.txt'}")
     failed = sum(get_results(x)[1] for x in xmls)
     sys.exit(1 if failed else 0)

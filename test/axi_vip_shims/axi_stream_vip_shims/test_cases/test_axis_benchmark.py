@@ -17,10 +17,11 @@ How the receiver gets its beats is the other variable ("reads" in the table):
   every B      the shim queues the beats; cocotb sleeps until B are waiting,
                drains those B, and sleeps again (bench_vip_batch_*).
 
-Each test writes its numbers to artifacts/logs/benchmark/<test>.json;
-python/test_axis_benchmark_runner.py runs every test BENCH_REPEATS times, each in a fresh
-vsim, and collects the medians into artifacts/logs/benchmark.txt.
-Run through that runner.
+Each test writes its numbers to $BENCH_RESULT_DIR/<test>.json, a directory the
+runner chooses (artifacts/<runner>/results/). python/test_axis_benchmark_runner.py
+(or its Verilator twin) runs every test BENCH_REPEATS times, each in a fresh
+simulator, and collects the medians into artifacts/<runner>/benchmark.txt.
+Run through one of those runners.
 """
 import json
 import logging
@@ -43,7 +44,9 @@ IFACE = dict(tdata_width=8 * W, has_tkeep=True, has_tstrb=True, has_tlast=True,
 # The runner names the result file after the test it launches, so renaming a
 # test cannot leave the table out of sync.
 TEST_NAME = os.environ.get("BENCH_NAME", "unnamed")
-RESULT_DIR = Path(__file__).resolve().parent.parent / "artifacts" / "logs" / "benchmark"
+# The runner also picks the directory, so the Questa and Verilator benchmarks
+# keep their results apart.
+RESULT_DIR = Path(os.environ.get("BENCH_RESULT_DIR", "bench_results"))
 
 
 async def reset(dut, cycles=20):

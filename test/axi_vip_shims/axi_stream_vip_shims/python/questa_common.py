@@ -25,7 +25,8 @@ Environment (both runners):
                      (default: build/ip/*/sim, generated with hdl/gen_vip.tcl)
     AXIS_DPI_LIB     DPI library (default: lib/libaxis_dpi.so from CMake)
 
-Logs: artifacts/logs/build.log and artifacts/logs/<test>.log.
+Artifacts: each runner writes into its own artifacts/<runner>/ (named after the
+runner script, see artifact_dir): build.log, logs/<test>.log, wlf/<test>.wlf.
 """
 import functools
 import glob
@@ -45,9 +46,8 @@ REPO = HERE.parents[3]
 SHIM = REPO / "src" / "axi_vip_shims" / "axi_stream_vip_shim" / "src"
 BUILD_DIR = REPO / "build" / "sim_build_questa"
 IP_DIR = REPO / "build" / "ip"
+BUILD_LOG = BUILD_DIR / "build.log"                        # copied into each runner's dir
 ARTIFACTS = TEST_ROOT / "artifacts"
-LOG_DIR = ARTIFACTS / "logs"
-WAVE_DIR = ARTIFACTS / "wlf"
 GEN_VIP_TCL = TEST_ROOT / "hdl" / "gen_vip.tcl"
 
 TOPLEVEL = "tb_top"
@@ -177,6 +177,18 @@ def _dpi_lib():
     return lib.resolve()
 
 
+def artifact_dir(runner_file):
+    """artifacts/<runner>/ for the runner script runner_file (pass __file__)."""
+    return ARTIFACTS / Path(runner_file).stem
+
+
+def copy_build_log(build_log, out):
+    """Put the build log of this process's build into out/build.log."""
+    out.mkdir(parents=True, exist_ok=True)
+    if build_log.is_file():
+        shutil.copyfile(build_log, out / "build.log")
+
+
 def cocotb_tests(module):
     """Names of the @cocotb.test()s in test_cases/<module>.py, in file order."""
     src = (TEST_CASES / f"{module}.py").read_text()
@@ -206,7 +218,7 @@ def build():
         build_dir=BUILD_DIR,
         build_args=["-timescale", "1ns/1ps"],
         always=True,
-        log_file=LOG_DIR / "build.log",
+        log_file=BUILD_LOG,
     )
 
     # The runner hands vsim its own sys.path as PYTHONPATH (extra_env's is
@@ -217,11 +229,14 @@ def build():
     return runner
 
 
-def run_questa(testcase, module, waves=None):
-    """Run one cocotb test (or a list, in one vsim). Its log goes to
-    artifacts/logs/<name>.log and its waves to artifacts/wlf/<name>.wlf.
-    Returns the results.xml path."""
+def run_questa(testcase, module, out, waves=None, env=None):
+    """Run one cocotb test (or a list, in one vsim). out is the runner's
+    artifact_dir(): the log goes to out/logs/<name>.log, the waves to
+    out/wlf/<name>.wlf, the build log to out/build.log. env is added to the
+    test's environment. Returns the results.xml path."""
     runner = build()
+    copy_build_log(BUILD_LOG, out)
+    log_dir, wave_dir = out / "logs", out / "wlf"
     lib = _dpi_lib()
     names = [testcase] if isinstance(testcase, str) else list(testcase)
     name = names[0] if len(names) == 1 else "tests"
@@ -234,9 +249,9 @@ def run_questa(testcase, module, waves=None):
     args = ["-sv_lib", str(lib.with_suffix("")), "-dpioutoftheblue", "1",
             "-voptargs=+acc", "-t", "1ps"]
     if waves:
-        WAVE_DIR.mkdir(parents=True, exist_ok=True)
-        args += ["-wlf", str(WAVE_DIR / f"{name}.wlf")]
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+        wave_dir.mkdir(parents=True, exist_ok=True)
+        args += ["-wlf", str(wave_dir / f"{name}.wlf")]
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     return runner.test(
         test_module=module,
@@ -245,9 +260,9 @@ def run_questa(testcase, module, waves=None):
         build_dir=BUILD_DIR,
         test_args=args,
         # BENCH_NAME: the benchmark names its result file after the test
-        extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name},
+        extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name, **(env or {})},
         results_xml=str(BUILD_DIR / f"{name}.results.xml"),   # pytest wants absolute
-        log_file=LOG_DIR / f"{name}.log",
+        log_file=log_dir / f"{name}.log",
         waves=waves,
         gui=os.environ.get("GUI") == "1",
     )

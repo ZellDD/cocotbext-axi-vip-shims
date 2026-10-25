@@ -21,4 +21,4 @@ clean:
 	find . \( -path ./.venv -o -path ./.git \) -prune -o \
 	       -name __pycache__ -type d -prune -exec rm -rf {} +
 	rm -rf .pytest_cache
-	find test -path '*/artifacts/*' -type f ! -name .gitkeep -delete
+	find test -path '*/artifacts/*' -prune ! -name .gitkeep -exec rm -rf {} +

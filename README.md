@@ -163,8 +163,8 @@ test/axi_vip_shims/axi_stream_vip_shims/
   python/test_axis_benchmark_verilator_runner.py  test_axis_benchmark.py on Verilator
   python/test_c_side.py          simulator-free test of the C + Python layers
   dpi_c/test_c_side_mock.c       mock simulator/SV side for test_c_side.py
-  artifacts/logs                 per-test logs, Verilator ones under logs/verilator (generated)
-  artifacts/wlf, artifacts/vcd   Questa / Verilator waveforms (generated)
+  artifacts/<runner>/            one dir per runner: logs, waves, results (generated,
+                                 see [Test artifacts](#test-artifacts))
 lib/                             built shared libraries (generated)
 build/                           CMake build, generated VIP cores, Questa work library,
                                  Verilator model (build/sim_build_verilator)
@@ -344,11 +344,11 @@ TKEEP=0. Pass both.
   ```
 
   It finds Vivado through `XILINX_VIVADO` or `vivado` on `PATH`. Each cocotb
-  test runs in its own `vsim`. It writes its log to
-  `test/axi_vip_shims/axi_stream_vip_shims/artifacts/logs/<test>.log` and
-  records all signals to `.../artifacts/wlf/<test>.wlf`. The build log is
-  `artifacts/logs/build.log`. Open a waveform with
-  `vsim -view <path>/artifacts/wlf/test_tdata.wlf`. Set `WAVES=0` to
+  test runs in its own `vsim`, with its log in
+  `artifacts/test_axis_vip_runner/logs/<test>.log` and all signals recorded
+  to `artifacts/test_axis_vip_runner/wlf/<test>.wlf` (see
+  [Test artifacts](#test-artifacts)). Open a waveform with
+  `vsim -view <path>/wlf/test_tdata.wlf`. Set `WAVES=0` to
   skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
   test. `./install.sh` builds everything and runs both test sets.
 
@@ -363,15 +363,37 @@ TKEEP=0. Pass both.
   ```
 
   Under pytest it is skipped when `verilator` is not on `PATH`. Each cocotb
-  test runs in its own model run. Logs go to `artifacts/logs/verilator/`
-  (`build.log`, `<test>.log`) and waveforms to `artifacts/vcd/<test>.vcd`
-  (view with GTKWave or Surfer). `WAVES=0`, `GUI=1` (opens GTKWave after one
+  test runs in its own model run. Logs go to
+  `artifacts/test_axis_vip_verilator_runner/logs/<test>.log` and waveforms
+  to `.../vcd/<test>.vcd` (view with GTKWave or Surfer). `WAVES=0`, `GUI=1` (opens GTKWave after one
   run of all selected tests) and `TESTCASE=<a>,<b>` work as on Questa. Waves
   are a build-time option in Verilator, so `WAVES=0` builds the model without
   tracing.
 
   With Verilator 5.052, 18 of the 19 tests pass. `test_flush_slave` fails:
   five cycles after `wait_idle()`, `pending` shows 4 beats instead of 5.
+
+### Test artifacts
+
+Every runner writes into its own directory under
+`test/axi_vip_shims/axi_stream_vip_shims/artifacts/`, named after the runner
+script, and only what applies to it:
+
+```
+artifacts/
+  test_axis_vip_runner/                  build.log  logs/<test>.log  wlf/<test>.wlf
+  test_axis_vip_verilator_runner/        build.log  logs/<test>.log  vcd/<test>.vcd
+  test_axis_benchmark_runner/            build.log  logs/<test>.log  results/  benchmark.txt
+  test_axis_benchmark_verilator_runner/  build.log  logs/<test>.log  results/  benchmark.txt
+```
+
+- `build.log` is the log of the build this run used. The Questa runners share
+  one build in `build/sim_build_questa/`, and the Verilator runners share one in
+  `build/sim_build_verilator/`, so the same log can show up in two directories.
+- `results/` holds each benchmark case's `<test>.json` while the runner
+  collects it into `benchmark.txt`.
+
+The whole tree is generated and ignored by git; `make clean` empties it.
 
 ### Using your own VIP sources
 
@@ -426,7 +448,8 @@ BENCH_REPEATS=5 python3 .../test_axis_benchmark_runner.py     # runs per case (d
 ```
 
 Every run of every case is a fresh `vsim`. The table, with the median wall
-time and the spread across runs, goes to `artifacts/logs/benchmark.txt`.
+time and the spread across runs, goes to
+`artifacts/test_axis_benchmark_runner/benchmark.txt`.
 cocotbext-axi's per-frame INFO logging is switched off during the benchmark,
 because the shims log nothing per beat.
 
@@ -448,7 +471,8 @@ comparison of the two setups and not a measure of the shims' own overhead.
 The same benchmark runs on Verilator through
 [test_axis_benchmark_verilator_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py).
 It takes the same `BENCH_BEATS` / `BENCH_REPEATS`, always builds without
-waves, and writes its table to `artifacts/logs/verilator/benchmark.txt`:
+waves, and writes its table to
+`artifacts/test_axis_benchmark_verilator_runner/benchmark.txt`:
 
 ```sh
 python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py
