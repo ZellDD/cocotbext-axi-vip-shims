@@ -151,8 +151,6 @@ src/axi_vip_shims/axi_stream_vip_shim/
 test/axi_vip_shims/axi_stream_vip_shims/
   hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
   hdl/gen_vip.tcl                generates the two VIP cores in Vivado batch mode
-  hdl/verilator/axi4stream_vip_axi4streampc_stub.sv
-                                 no-check stand-in for the VIP protocol checker (Verilator only)
   test_cases/test_axis_vip.py    functional cocotb tests, one per AXI4-Stream option
   test_cases/test_axis_benchmark.py  benchmark: VIP shims vs cocotbext-axi
   python/questa_common.py        shared Questa flow: VIP sources, build, run
@@ -481,10 +479,13 @@ BENCH=1 pytest test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmar
 
 Verilator is about 10× faster in wall time than Questa Starter, and the
 pattern is the same. For 10,240 beats in 16-beat packets, cocotbext-axi takes
-about 1.4 s, the shims about 1.8 s when reading each beat as it arrives, and
-about 1.0 s with batched reads (about 1.4× faster than cocotbext-axi).
+about 1.55 s, the shims about 2.0 s when reading each beat as it arrives, and
+about 1.1 s with batched reads (about 1.4× faster than cocotbext-axi).
 Because the model is so fast, a fixed part of each run (start-up, cocotb)
-is a larger share: an idle run with no traffic already takes about 0.4 s.
+is a larger share: an idle run with no traffic already takes about 0.45 s.
+These numbers include the protocol checkers (`--assert`). They cost about 10%
+on every case, including cocotbext-axi's, because the checkers on the VIP
+interfaces run on every clock either way.
 
 `pending` is updated in the NBA region, so right after `try_get_transaction()`
 it still shows the old count until the time step settles. Wait a simulator
@@ -520,29 +521,41 @@ with these differences:
   through `AXIS_DPI_LIB` and gets the copy that is already loaded, so both
   sides still share one instance table. Rebuild the model after rebuilding
   the library.
-- **No protocol checks.** The VIP's protocol checker
-  (`axi4stream_vip_axi4streampc.sv`) crashes Verilator: its `tri0`/`tri1`
-  ports, on an interface nested in the parameterized `axi4stream_vip_if` and
-  fed from tri-stated nets, cause an internal fault, and its SVA uses
-  `##[m:n]` sequences. The flow swaps in
-  [a stub](test/axi_vip_shims/axi_stream_vip_shims/hdl/verilator/axi4stream_vip_axi4streampc_stub.sv)
-  with the same parameters and ports and no checks. AXI4-Stream protocol
-  violations are therefore only reported on Questa.
+- **The protocol checker is patched and built with `--assert`.** Xilinx's
+  `axi4stream_vip_axi4streampc.sv` crashes Verilator as shipped: its
+  `tri0`/`tri1` input ports, on an interface nested in the parameterized
+  `axi4stream_vip_if` and fed from tri-stated nets, cause an internal fault.
+  At build time the flow writes a copy to
+  `build/sim_build_verilator/patched_vip/` with those 6 ports declared as
+  `wire` and compiles that copy instead. The pull-up/pull-down only matters for
+  an undriven input, and the VIP top drives all of them. Every check is left as
+  it is, and line numbers in checker messages match the original file.
+  Verilator ignores assertions unless `--assert` is given, so the flow sets it.
+  A violation stops the run with the checker's message, for example:
+
+  ```
+  %Fatal: axi4stream_vip_axi4streampc.sv:311: Assertion failed in tb_top.slv_vip.inst.IF.PC...:
+  AXI4STREAM_ERRM_TKEEP_TSTRB. If TKEEP is deasserted then TSTRB must also be deasserted ...
+  ```
+
+  One limit: Verilator is 2-state, so the `*_X` checks (built on
+  `$isunknown`) can never fail there. The stability, reset, TKEEP/TSTRB,
+  tie-off and max-wait checks all work.
 - **Unused VIP files are left out.** `axi_vip_pkg.sv`, `axi_vip_if.sv`,
   `axi_vip_axi4pc.sv`, `clk_vip_if.sv` and `rst_vip_if.sv` are compiled by
   Questa but not needed for AXI4-Stream, and Verilator rejects
   `axi_vip_pkg.sv`.
-- **Build flags:** `--timing` (the VIP drivers use `#` and `@` delays) and
-  `-Wno-fatal -Wno-lint -Wno-style`. The build log shows `MULTIDRIVEN`
+- **Build flags:** `--timing` (the VIP drivers use `#` and `@` delays),
+  `--assert` (see above) and `-Wno-fatal -Wno-lint -Wno-style`. The build log shows `MULTIDRIVEN`
   warnings from `axi4stream_vip_if.sv` (clocking block and continuous
   assignment on the same signals); they come from the Xilinx code and don't
   stop the build.
 - `+define+XIL_DO_NOT_USE_ADV_RANDOMIZATION` is set as on Questa. Here it
   also keeps the VIP off Verilator's limited `randomize()` support.
 
-Verilator 5.032 can't build the bench: besides the checker, it rejects VIP
-methods called without parentheses (`this.get_data_width`) and crashes on the
-VIP's interface reached by hierarchical path (`tb_top.mst_vip.inst.IF`).
+Verilator 5.032 can't build the bench: it rejects VIP methods called without
+parentheses (`this.get_data_width`) and crashes on the VIP's interface reached
+by hierarchical path (`tb_top.mst_vip.inst.IF`).
 
 ## Other simulators
 

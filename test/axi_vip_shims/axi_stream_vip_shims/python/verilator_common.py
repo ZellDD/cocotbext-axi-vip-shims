@@ -7,7 +7,9 @@ Verilator resolves DPI at link time, so lib/libaxis_dpi.so is linked into the
 model (with an rpath) instead of loaded with -sv_lib; cocotb then opens the
 same file through AXIS_DPI_LIB and gets the already-loaded copy.
 
-Known not to build with Verilator 5.032, see "Other simulators" in README.md.
+The Xilinx protocol checker is compiled with --assert, from a patched copy
+(see _patch_checker). Known not to build with Verilator 5.032, see "Verilator
+notes" in README.md.
 
 Environment: AXIS_VIP_SRC, XILINX_VIVADO, AXIS_VIP_IP_DIRS, AXIS_DPI_LIB as in
 questa_common.py, and
@@ -19,6 +21,7 @@ instead of wlf/.
 """
 import functools
 import os
+import re
 import shutil
 import sys
 
@@ -37,9 +40,27 @@ BUILD_LOG = BUILD_DIR / "build.log"                        # copied into each ru
 # rejects axi_vip_pkg.sv (%b with a string argument)
 UNUSED_VIP_FILES = {"axi_vip_axi4pc.sv", "axi_vip_pkg.sv", "axi_vip_if.sv",
                     "clk_vip_if.sv", "rst_vip_if.sv"}
-# The protocol checker crashes Verilator; replaced by a stub without checks
+# The protocol checker, built from a patched copy (see _patch_checker)
 CHECKER = "axi4stream_vip_axi4streampc.sv"
-CHECKER_STUB = TEST_ROOT / "hdl" / "verilator" / "axi4stream_vip_axi4streampc_stub.sv"
+PATCHED_DIR = BUILD_DIR / "patched_vip"
+
+
+def _patch_checker(src):
+    """Copy of the Xilinx protocol checker that Verilator can build.
+
+    Its tri0/tri1 input ports, on an interface nested in the parameterized
+    axi4stream_vip_if and fed from tri-stated nets, crash Verilator (internal
+    fault in V3LinkDot). They become plain wires: the pull-up/-down only
+    matters for an undriven input, and the VIP top drives all of them. The
+    checks themselves are unchanged."""
+    text, n = re.subn(r"^(\s*input\s+)tri[01]\b", r"\1wire", src.read_text(),
+                      flags=re.MULTILINE)
+    PATCHED_DIR.mkdir(parents=True, exist_ok=True)
+    dst = PATCHED_DIR / src.name
+    # note at the end, so line numbers in checker messages match the original
+    dst.write_text(text + f"\n// {src} with {n} tri0/tri1 ports as wire, "
+                   "made by verilator_common.py\n")
+    return dst
 
 
 def _waves():
@@ -56,7 +77,7 @@ def build():
         vivado = _vivado()
         vip = _vip_sources(vivado) + _generated_sources(vivado)
         includes = [vivado / "data" / "xilinx_vip" / "include"]
-    vip = [CHECKER_STUB if f.name == CHECKER else f
+    vip = [_patch_checker(f) if f.name == CHECKER else f
            for f in vip if f.name not in UNUSED_VIP_FILES]
     sources = vip + [SHIM / "hdl" / "axis_vip_dpi.sv", TEST_ROOT / "hdl" / "tb_top.sv"]
     lib = _dpi_lib()
@@ -72,6 +93,7 @@ def build():
         build_dir=BUILD_DIR,
         build_args=[
             "--timing",                    # the VIP's drivers use # and @ delays
+            "--assert",                    # else the protocol checker's SVA is ignored
             "-Wno-fatal", "-Wno-lint", "-Wno-style",
             # the DPI imports are resolved when the model is linked
             str(lib), "-LDFLAGS", f"-Wl,-rpath,{lib.parent}",
