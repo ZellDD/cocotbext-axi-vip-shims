@@ -49,13 +49,13 @@ _libs = {}
 
 def load_lib(lib_path=None):
     path =  (
-        lib_path or  
-        os.environ.get("AXIS_DPI_LIB") or 
+        lib_path or
+        os.environ.get("AXIS_DPI_LIB") or
         os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "libaxis_dpi.so"
         )
     )
-    
+
     path = os.path.realpath(path)
 
     if path in _libs:
@@ -63,7 +63,7 @@ def load_lib(lib_path=None):
 
     # loads contents of axis_dpi.cpp/.so
     lib = ctypes.CDLL(path)
-    # integer pointer into the 
+    # integer pointer into the
     ip = POINTER(c_int)
 
     # defines available functions with associated signatures

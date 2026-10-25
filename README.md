@@ -1,7 +1,7 @@
 # cocotbext-axi-vip-shims
 
 > [!CAUTION]
->    This repository is 100% vibe coded as a personal profiling project and experimental test playground. 
+>    This repository is 100% vibe coded as a personal profiling project and experimental test playground.
 >    Standard disclaimer applies: it works on my machine, edge cases may be ignored, and architectural decisions were made based on vibes.
 >    You are completely free to use, fork, extend, modify, or break it for your own purposes. No warranties provided, but PRs and feedback are welcome!
 
