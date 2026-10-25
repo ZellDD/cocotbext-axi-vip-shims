@@ -1,14 +1,15 @@
-"""cocotb runner for test_axis_vip.py on Questa / ModelSim.
+"""Shared Questa / ModelSim flow for the cocotb runners next to this file:
+
+    test_axis_vip_runner.py        functional tests  (../test_cases/test_axis_vip.py)
+    test_axis_benchmark_runner.py  benchmark         (../test_cases/test_axis_benchmark.py)
 
 Compiles the Xilinx VIP sources from the Vivado install, the generated VIP
 cores (made by hdl/gen_vip.tcl on first run), the DPI shims and tb_top.sv into
-one library, and runs the cocotb tests with lib/libaxis_dpi.so loaded by vsim
+one library, and runs cocotb tests with lib/libaxis_dpi.so loaded by vsim
 (-sv_lib) and by cocotb (AXIS_DPI_LIB). With AXIS_VIP_SRC set, all VIP sources
 come from there instead and Vivado is not needed.
 
-    python3 test_questa_runner.py     (or: pytest test_questa_runner.py)
-
-Environment:
+Environment (both runners):
     AXIS_VIP_SRC     use your own VIP sources instead of Vivado:
                      - a directory holding the Xilinx VIP packages/interfaces
                        (xil_common_vip_pkg.sv, axi4stream_vip_pkg.sv, ...), the
@@ -23,13 +24,6 @@ Environment:
     AXIS_VIP_IP_DIRS ':'-separated sim/ dirs of your own generated VIP cores
                      (default: build/ip/*/sim, generated with hdl/gen_vip.tcl)
     AXIS_DPI_LIB     DPI library (default: lib/libaxis_dpi.so from CMake)
-    WAVES=0          don't record waves (default: every test is recorded into
-                     artifacts/wlf/<test>.wlf; view with `vsim -view <file>`)
-    GUI=1            open the Questa GUI (all selected tests in one session)
-    TESTCASE         run only these tests (comma-separated)
-    BENCH=1          run the benchmark (test_axis_benchmark.py) instead and
-                     write artifacts/logs/benchmark.txt; BENCH_BEATS=<n> beats,
-                     BENCH_REPEATS=<n> runs per case (default 3, each a fresh vsim)
 
 Logs: artifacts/logs/build.log and artifacts/logs/<test>.log.
 """
@@ -42,12 +36,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-from cocotb_tools.check_results import get_results
 from cocotb_tools.runner import get_runner
 
 HERE = Path(__file__).resolve().parent
 TEST_ROOT = HERE.parent                                    # .../axi_stream_vip_shims
+TEST_CASES = TEST_ROOT / "test_cases"                      # the cocotb test modules
 REPO = HERE.parents[3]
 SHIM = REPO / "src" / "axi_vip_shims" / "axi_stream_vip_shim" / "src"
 BUILD_DIR = REPO / "build" / "sim_build_questa"
@@ -184,9 +177,9 @@ def _dpi_lib():
     return lib.resolve()
 
 
-def cocotb_tests(module="test_axis_vip"):
-    """Names of the @cocotb.test()s in <module>.py, in file order."""
-    src = (HERE / f"{module}.py").read_text()
+def cocotb_tests(module):
+    """Names of the @cocotb.test()s in test_cases/<module>.py, in file order."""
+    src = (TEST_CASES / f"{module}.py").read_text()
     return re.findall(r"@cocotb\.test\([^)]*\)\s*\n\s*async def (\w+)", src)
 
 
@@ -217,14 +210,14 @@ def build():
     )
 
     # The runner hands vsim its own sys.path as PYTHONPATH (extra_env's is
-    # overwritten), so the test module and axis_vip_dpi must be on it.
-    for p in (str(SHIM / "pyhon"), str(HERE)):
+    # overwritten), so the test modules and axis_vip_dpi must be on it.
+    for p in (str(SHIM / "pyhon"), str(TEST_CASES)):
         if p not in sys.path:
             sys.path.insert(0, p)
     return runner
 
 
-def run_questa(testcase, module="test_axis_vip", waves=None):
+def run_questa(testcase, module, waves=None):
     """Run one cocotb test (or a list, in one vsim). Its log goes to
     artifacts/logs/<name>.log and its waves to artifacts/wlf/<name>.wlf.
     Returns the results.xml path."""
@@ -251,97 +244,10 @@ def run_questa(testcase, module="test_axis_vip", waves=None):
         testcase=names,
         build_dir=BUILD_DIR,
         test_args=args,
+        # BENCH_NAME: the benchmark names its result file after the test
         extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name},
         results_xml=str(BUILD_DIR / f"{name}.results.xml"),   # pytest wants absolute
         log_file=LOG_DIR / f"{name}.log",
         waves=waves,
         gui=os.environ.get("GUI") == "1",
     )
-
-
-def _selected():
-    testcase = os.environ.get("TESTCASE")
-    return testcase.split(",") if testcase else cocotb_tests()
-
-
-# One pytest case per cocotb test, each in its own vsim with its own .wlf.
-# Under pytest the runner fails the case itself when the cocotb test fails.
-@pytest.mark.parametrize("testcase", _selected())
-def test_axis_vip_questa(testcase):
-    run_questa(testcase)
-
-
-BENCH_DIR = LOG_DIR / "benchmark"
-
-
-def benchmark():
-    """Run every bench_* test of test_axis_benchmark.py BENCH_REPEATS times
-    (default 3), each run in a fresh vsim and without waves (logging would
-    dominate the timing). Tabulates median wall time and spread into
-    artifacts/logs/benchmark.txt. Returns (table, results.xml paths)."""
-    import json
-    import statistics
-    repeats = int(os.environ.get("BENCH_REPEATS", 3))
-    shutil.rmtree(BENCH_DIR, ignore_errors=True)
-    xmls, runs = [], {}
-    for _ in range(repeats):             # interleaved, so drift hits every case
-        for t in cocotb_tests("test_axis_benchmark"):
-            xml = run_questa(t, module="test_axis_benchmark", waves=False)
-            xmls.append(xml)
-            f = BENCH_DIR / f"{t}.json"
-            if f.is_file():
-                runs.setdefault(t, []).append(json.loads(f.read_text()))
-                f.unlink()
-            elif get_results(xml)[1] == 0:       # no result and no failure either
-                raise RuntimeError(f"{t} passed but wrote no {f.name}")
-
-    head = ("test", "flavour", "reads", "beats", "beats/pkt", "runs",
-            "wall [s]", "spread", "beats/s", "sim [us]", "beats/cycle")
-    body = []
-    for t in sorted(runs):
-        rs = runs[t]
-        walls = [r["wall_s"] for r in rs]
-        med = statistics.median(walls)
-        r = rs[0]
-        body.append((t, r["flavour"], r["reads"], r["beats"], r["beats_per_packet"],
-                     len(rs), f"{med:.2f}", f"{(max(walls) - min(walls)) / med:.0%}",
-                     f"{round(r['beats'] / med):,}", f'{r["sim_us"]:.1f}',
-                     f'{r["beats_per_cycle"]:.3f}'))
-    widths = [max(len(str(c)) for c in col) for col in zip(head, *body)]
-    line = lambda cells: "  ".join(str(c).rjust(w) for c, w in zip(cells, widths))  # noqa: E731
-    table = "\n".join([line(head), line("-" * w for w in widths)] + [line(b) for b in body])
-    note = (f"\nmedian of {repeats} runs per case, each in a fresh vsim; "
-            "spread = (max - min) / median of the wall times\n")
-    (LOG_DIR / "benchmark.txt").write_text(table + "\n" + note)
-    return table + "\n" + note, xmls
-
-
-# Opt-in: takes a while and measures speed rather than correctness.
-@pytest.mark.skipif(os.environ.get("BENCH") != "1", reason="set BENCH=1 to run")
-def test_benchmark():
-    table, _ = benchmark()
-    print("\n" + table)
-
-
-if __name__ == "__main__" and os.environ.get("BENCH") == "1":
-    table, xmls = benchmark()
-    print(table)
-    print(f"\nwritten to {LOG_DIR / 'benchmark.txt'}")
-    failed = sum(get_results(x)[1] for x in xmls)
-    sys.exit(1 if failed else 0)
-
-if __name__ == "__main__":
-    # standalone, the runner does not check results.xml: do it here
-    if os.environ.get("GUI") == "1":
-        results = [run_questa(_selected())]       # one interactive session
-    else:
-        results = [run_questa(t) for t in _selected()]
-    n_tests = n_failed = 0
-    for r in results:
-        t, f = get_results(r)
-        n_tests, n_failed = n_tests + t, n_failed + f
-    print(f"{n_tests - n_failed}/{n_tests} cocotb tests passed")
-    if os.environ.get("WAVES", "1") != "0":
-        print(f"waves: {WAVE_DIR}/<test>.wlf   (view: vsim -view <file>)")
-    print(f"logs:  {LOG_DIR}/<test>.log")
-    sys.exit(1 if n_failed or not n_tests else 0)

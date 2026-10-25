@@ -18,9 +18,9 @@ How the receiver gets its beats is the other variable ("reads" in the table):
                drains those B, and sleeps again (bench_vip_batch_*).
 
 Each test writes its numbers to artifacts/logs/benchmark/<test>.json;
-test_questa_runner.py runs every test BENCH_REPEATS times, each in a fresh
+python/test_axis_benchmark_runner.py runs every test BENCH_REPEATS times, each in a fresh
 vsim, and collects the medians into artifacts/logs/benchmark.txt.
-Run through the runner (BENCH=1 or the test_benchmark pytest case).
+Run through that runner.
 """
 import json
 import logging

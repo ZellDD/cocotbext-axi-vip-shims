@@ -1,7 +1,7 @@
 """Functional tests: cocotb -> master shim -> Xilinx VIP master -> bus ->
 Xilinx VIP slave -> slave shim -> cocotb, one test per AXI4-Stream option.
 
-Each test runs in its own simulation (see test_questa_runner.py). Besides comparing
+Each test runs in its own simulation (see python/test_axis_vip_runner.py). Besides comparing
 what comes out with what went in, `Bus` watches TVALID/TREADY on the wires,
 so delays and backpressure are checked as they really happen on the bus.
 """
