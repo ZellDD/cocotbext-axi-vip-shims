@@ -15,7 +15,7 @@ Environment (plus the shared ones in verilator_common.py):
                      tests in one model run)
     TESTCASE         run only these tests (comma-separated)
     EXT_SHIMS_COVERAGE=0  no coverage under pytest (default: C, SV and Python,
-                          reported at the end and into build/coverage/, see
+                          reported at the end and into artifacts/coverage/, see
                           coverage_common.py; never when run as a script)
 """
 import os

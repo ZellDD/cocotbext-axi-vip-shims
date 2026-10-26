@@ -3,6 +3,7 @@
 #   build-and-unit  Every push / PR. From a bare Ubuntu image: venv,
 #                   requirements, CMake build of libaxis_dpi.so and the
 #                   simulator-free tests (test_c_side.py), all via ./install.sh.
+#
 #   verilator       Builds Verilator from source (cached by version) and runs
 #                   the functional cocotb tests on it, with the Xilinx VIP
 #                   sources taken from the secret AXIS_VIP_SRC_TXZ_B64.
@@ -16,12 +17,24 @@
 # (Settings > Secrets and variables > Actions). Redo this when the VIP version
 # or hdl/gen_vip.tcl changes.
 
+# =================================================================== workflow
 name: CI
 
+# ================================================================= run policy
 on:
   push:
-    branches: [main]
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       benchmark:
@@ -29,6 +42,7 @@ on:
         type: boolean
         default: false
 
+# ================================================== permissions & concurrency
 permissions:
   contents: read
 
@@ -36,11 +50,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ========================================================= shared environment
 env:
   VERILATOR_VERSION: "5.052"
   TEST_DIR: test/axi_vip_shims/axi_stream_vip_shims
 
+# ======================================================================= jobs
 jobs:
+
+  # ====================================================== job: build-and-unit
   build-and-unit:
     name: Build + simulator-free tests (Python ${{ matrix.python }})
     runs-on: ubuntu-24.04
@@ -49,6 +67,7 @@ jobs:
       matrix:
         python: ["3.12", "3.14"]
     steps:
+      # ---------------------------------------------------------------- setup
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
@@ -57,6 +76,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      # ---------------------------------------------------------- build tools
       - name: Build tools
         run: |
           sudo apt-get update
@@ -64,6 +84,7 @@ jobs:
           cmake --version | head -1
           c++ --version | head -1
 
+      # -------------------------------------------------------- build + tests
       # No vsim and no verilator here, so install.sh deselects the Questa
       # runners and the Verilator runners skip themselves.
       - name: Install, build and test (./install.sh)
@@ -72,19 +93,19 @@ jobs:
       - name: Library exports
         run: nm -D --defined-only lib/libaxis_dpi.so | grep ' T axis_dpi_'
 
-      # Python (pytest-cov) and C (gcovr) coverage of the simulator-free
-      # tests, HTML + Cobertura XML (see "Coverage" in README.md)
-      - name: Upload coverage
+      # ------------------------------------------------------------ artifacts
+      # Everything the tests write goes to $TEST_DIR/artifacts/ (see "Test
+      # artifacts" in README.md); here: the Python and C coverage reports.
+      - name: Upload unit artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-unit-py${{ matrix.python }}
-          path: |
-            build/coverage/
-            !build/coverage/raw/
+          name: unit-py${{ matrix.python }}-artifacts
+          path: ${{ env.TEST_DIR }}/artifacts/
           if-no-files-found: ignore
           retention-days: 14
 
+  # ========================================================== job: vip-secret
   # Secrets can't be tested in a job-level `if`, so this job reports whether
   # the VIP sources are available.
   vip-secret:
@@ -104,6 +125,7 @@ jobs:
             echo "::notice::Secret AXIS_VIP_SRC_TXZ_B64 not available: Verilator simulation skipped"
           fi
 
+  # =========================================================== job: verilator
   verilator:
     name: Simulation on Verilator ${{ github.event_name == 'workflow_dispatch' && inputs.benchmark && '+ benchmark' || '' }}
     needs: [build-and-unit, vip-secret]
@@ -113,6 +135,7 @@ jobs:
     env:
       WAVES: "0"                     # waves off in CI; logs are uploaded
     steps:
+      # ---------------------------------------------------------------- setup
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
@@ -121,7 +144,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      # -------------------------------------------------------- Verilator
+      # ------------------------------------------------------------ Verilator
       - name: Cache Verilator ${{ env.VERILATOR_VERSION }}
         id: verilator-cache
         uses: actions/cache@v6
@@ -155,7 +178,7 @@ jobs:
       - name: Verilator version
         run: verilator --version
 
-      # ------------------------------------------------------ VIP sources
+      # ---------------------------------------------------------- VIP sources
       # Unpacked outside the workspace, so nothing below can upload them.
       - name: Unpack VIP sources from secret
         env:
@@ -167,11 +190,11 @@ jobs:
           echo "AXIS_VIP_SRC=$dir/axis_vip_src" >> "$GITHUB_ENV"
           (cd "$dir/axis_vip_src" && find . -type f | sort)
 
-      # ------------------------------------------------------------ build
+      # ---------------------------------------------------------------- build
       - name: Install and build (./install.sh --no-tests)
         run: ./install.sh --no-tests
 
-      # ------------------------------------------------------------ tests
+      # ---------------------------------------------------------------- tests
       # test_flush_slave is a known failure on Verilator (see README), so it
       # is deselected to keep the job meaningful; drop that line once fixed.
       # Debug log on (cocotb -> DPI -> SV, see "Debug log" in README.md), so a
@@ -182,8 +205,7 @@ jobs:
         run: |
           .venv/bin/python -m pytest -v \
             "$TEST_DIR/python/test_axis_vip_verilator_runner.py" \
-            --deselect "$TEST_DIR/python/test_axis_vip_verilator_runner.py::test_axis_vip_verilator[test_flush_slave]" \
-            --junitxml=junit-verilator.xml
+            --junitxml="$TEST_DIR/artifacts/junit-verilator.xml"
 
       - name: Benchmark on Verilator
         if: github.event_name == 'workflow_dispatch' && inputs.benchmark
@@ -194,28 +216,16 @@ jobs:
           f="$TEST_DIR/artifacts/test_axis_benchmark_verilator_runner/benchmark.txt"
           { echo "### Verilator benchmark"; echo '```'; cat "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-      # -------------------------------------------------------- artifacts
-      # Logs, benchmark tables and coverage reports (Python, C and SV) only.
-      # The VIP sources stay in RUNNER_TEMP, and the rest of build/ (with the
-      # patched checker copy) is not uploaded.
-      - name: Upload coverage
+      # ------------------------------------------------------------ artifacts
+      # Everything the tests write goes to $TEST_DIR/artifacts/: logs,
+      # benchmark tables, coverage reports, junit-verilator.xml. The VIP
+      # sources stay in RUNNER_TEMP, and build/ (with the patched checker
+      # copy) is not uploaded.
+      - name: Upload verilator artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-verilator
-          path: |
-            build/coverage/
-            !build/coverage/raw/
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: verilator-logs
-          path: |
-            ${{ env.TEST_DIR }}/artifacts/
-            junit-*.xml
+          name: verilator-artifacts
+          path: ${{ env.TEST_DIR }}/artifacts/
           if-no-files-found: ignore
           retention-days: 14

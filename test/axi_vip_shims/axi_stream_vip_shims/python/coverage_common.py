@@ -12,7 +12,9 @@ Collected only under pytest (`pytest -s` from the repo root), by the
 functional runners; benchmarks never (instrumentation would skew the
 timings), nor a runner started as a script. conftest.py calls reset() at the
 start of the session and report() at the end, which merges the C and SV data
-into build/coverage/{c,sv_verilator,sv_questa}/; pytest-cov reports Python.
+into artifacts/coverage/{c,sv_verilator,sv_questa}/; pytest-cov reports Python
+into artifacts/coverage/python/ (pytest.ini). The raw data stays in
+build/coverage/.
 
 No toggle coverage on the SV side: the shims pass 4096-bit DPI vectors, and
 their unused upper bits would drown the number.
@@ -34,8 +36,9 @@ TEST_ROOT = HERE.parent
 REPO = HERE.parents[3]
 SHIM = REPO / "src" / "axi_vip_shims" / "axi_stream_vip_shim" / "src"
 BUILD = REPO / "build"
-COV = BUILD / "coverage"
-RAW = COV / "raw"                                          # one file per run
+COV = TEST_ROOT / "artifacts" / "coverage"                 # reports, next to the logs
+WORK = BUILD / "coverage"                                  # raw data, not an artifact
+RAW = WORK / "raw"                                         # one file per run
 COV_LIB = REPO / "lib" / "libaxis_dpi_cov.so"
 PY_DATA = BUILD / ".coverage"                              # = data_file in .coveragerc
 
@@ -57,7 +60,7 @@ def cocotb_env():
     runs Python's atexit, so coverage's own subprocess support doesn't save
     there). Parallel data files next to PY_DATA, which pytest-cov combines;
     absolute paths, since the simulator runs in another directory."""
-    rc = COV / "cocotb.coveragerc"
+    rc = WORK / "cocotb.coveragerc"
     rc.parent.mkdir(parents=True, exist_ok=True)
     rc.write_text(f"[run]\nsource = {SHIM / 'python'}\ndata_file = {PY_DATA}\n"
                   "parallel = true\n")

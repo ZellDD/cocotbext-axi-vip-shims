@@ -134,7 +134,6 @@ therefore costs no DPI calls and no clock-edge wakeups.
 
 The simulator (`-sv_lib`) and cocotb (`ctypes.CDLL`) must load **the same
 file**, so that they share one instance table. If they don't, the first call
-fails with "has not registered".
 
 ## Requirements
 
@@ -403,9 +402,9 @@ out.
 
 | Layer | Measured with | Where it runs | Report |
 |-------|---------------|---------------|--------|
-| Python `axis_vip_dpi.py` | pytest-cov ([pytest.ini](pytest.ini), [.coveragerc](.coveragerc)) in-process; cocotb's own coverage (`COCOTB_USER_COVERAGE`) inside the simulator; combined | `test_c_side.py`, functional simulation tests | `build/coverage/python/` |
-| C `axis_dpi.cpp` | gcov + gcovr: `libaxis_dpi_test.so` in-process, `libaxis_dpi_cov.so` in the simulator; combined | both | `build/coverage/c/` |
-| SV `axis_vip_dpi.sv`, `tb_top.sv` | Verilator `--coverage-line --coverage-expr`; Questa `+cover=bcse` | functional simulation tests | `build/coverage/sv_verilator/`, `build/coverage/sv_questa/` |
+| Python `axis_vip_dpi.py` | pytest-cov ([pytest.ini](pytest.ini), [.coveragerc](.coveragerc)) in-process; cocotb's own coverage (`COCOTB_USER_COVERAGE`) inside the simulator; combined | `test_c_side.py`, functional simulation tests | `artifacts/coverage/python/` |
+| C `axis_dpi.cpp` | gcov + gcovr: `libaxis_dpi_test.so` in-process, `libaxis_dpi_cov.so` in the simulator; combined | both | `artifacts/coverage/c/` |
+| SV `axis_vip_dpi.sv`, `tb_top.sv` | Verilator `--coverage-line --coverage-expr`; Questa `+cover=bcse` | functional simulation tests | `artifacts/coverage/sv_verilator/`, `artifacts/coverage/sv_questa/` |
 
 - Each simulation run saves its SV data into `build/coverage/raw/<sim>/<test>`.
   At the end, the runs are merged (`verilator_coverage --write`,
@@ -426,12 +425,13 @@ out.
   The switch isn't called `COVERAGE`, because cocotb reads that name as a
   (deprecated) switch for its own coverage.
 - The Python and C reports are also written as Cobertura XML
-  (`build/coverage/{python,c}/coverage.xml`), for tools such as Codecov or an
+  (`artifacts/coverage/{python,c}/coverage.xml`), for tools such as Codecov or an
   IDE coverage view.
 
-CI uploads `build/coverage/` (without the raw data) as artifacts:
-`coverage-unit-py<version>` (Python and C, simulator-free) and
-`coverage-verilator` (all three layers, from the Verilator simulation).
+CI uploads the whole `artifacts/` directory (see
+[Test artifacts](#test-artifacts)) once per job, coverage included:
+`unit-py<version>-artifacts` (Python and C, simulator-free) and
+`verilator-artifacts` (all three layers, with that job's logs and JUnit XML).
 
 The shared code is in
 [coverage_common.py](test/axi_vip_shims/axi_stream_vip_shims/python/coverage_common.py).
@@ -440,9 +440,10 @@ For HDL coverage of your own DUT, see the
 
 ### Test artifacts
 
-Every runner writes into its own directory under
-`test/axi_vip_shims/axi_stream_vip_shims/artifacts/`, named after the runner
-script, and only what applies to it:
+Everything a test run produces for people to look at goes under
+`test/axi_vip_shims/axi_stream_vip_shims/artifacts/`, so CI uploads that one
+directory. Each runner writes into its own directory, named after the runner
+script, and only what applies to it. The coverage reports sit next to them:
 
 ```
 artifacts/
@@ -450,6 +451,8 @@ artifacts/
   test_axis_vip_verilator_runner/        build.log  logs/<test>.log  vcd/<test>.vcd
   test_axis_benchmark_runner/            build.log  logs/<test>.log  results/  benchmark.txt
   test_axis_benchmark_verilator_runner/  build.log  logs/<test>.log  results/  benchmark.txt
+  coverage/                              python/  c/  sv_verilator/  sv_questa/
+  junit-verilator.xml                    (CI only)
 ```
 
 - `build.log` is the log of the build this run used. The Questa runners share
@@ -459,6 +462,9 @@ artifacts/
   (benchmark, script runs, or `EXT_SHIMS_COVERAGE=0`).
 - `results/` holds each benchmark case's `<test>.json` while the runner
   collects it into `benchmark.txt`.
+- `coverage/` holds the reports from the last `pytest` run (see
+  [Coverage](#coverage)). The raw data they're made from stays in
+  `build/coverage/` and `build/.coverage`.
 
 The whole tree is generated and ignored by git; `make clean` empties it.
 
