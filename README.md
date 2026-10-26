@@ -136,41 +136,6 @@ The simulator (`-sv_lib`) and cocotb (`ctypes.CDLL`) must load **the same
 file**, so that they share one instance table. If they don't, the first call
 fails with "has not registered".
 
-## Layout
-
-```
-CMakeLists.txt, src/CMakeLists.txt
-install.sh                       venv + build + tests in one go
-Makefile                         make / make test / make clean
-requirements.txt, conftest.py
-pytest.ini, .coveragerc          coverage on every pytest run (see [Coverage](#coverage))
-src/axi_vip_shims/axi_stream_vip_shim/
-  CMakeLists.txt
-  src/hdl/axis_vip_dpi.sv        SV shims (master + slave)
-  src/dpi_c/axis_dpi.cpp         DPI-C trampoline
-  src/python/axis_vip_dpi.py      cocotb classes
-examples/axis_byteswap/          standalone project using the shims (see [Examples](#examples))
-test/axi_vip_shims/axi_stream_vip_shims/
-  hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
-  hdl/gen_vip.tcl                generates the two VIP cores in Vivado batch mode
-  test_cases/test_axis_vip.py    functional cocotb tests, one per AXI4-Stream option
-  test_cases/test_axis_benchmark.py  benchmark: VIP shims vs cocotbext-axi
-  python/questa_common.py        shared Questa flow: VIP sources, build, run
-  python/test_axis_vip_questa_runner.py  runs test_cases/test_axis_vip.py on Questa
-  python/test_axis_benchmark_runner.py  runs test_cases/test_axis_benchmark.py on Questa
-  python/verilator_common.py     shared Verilator flow (reuses the VIP source discovery above)
-  python/test_axis_vip_verilator_runner.py        test_axis_vip.py on Verilator
-  python/test_axis_benchmark_verilator_runner.py  test_axis_benchmark.py on Verilator
-  python/test_c_side.py          simulator-free test of the C + Python layers
-  dpi_c/test_c_side_mock.c       mock simulator/SV side for test_c_side.py
-  artifacts/<runner>/            one dir per runner: logs, waves, results (generated,
-                                 see [Test artifacts](#test-artifacts))
-lib/                             built shared libraries (generated)
-build/                           CMake build, generated VIP cores, Questa work library,
-                                 Verilator models (build/sim_build_verilator, _cov),
-                                 coverage reports (build/coverage)
-```
-
 ## Requirements
 
 - Vivado with the AXI4-Stream VIP. You need a master and a slave VIP
