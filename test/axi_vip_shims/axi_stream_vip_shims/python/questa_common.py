@@ -4,7 +4,7 @@
     test_axis_benchmark_runner.py   benchmark         (../test_cases/test_axis_benchmark.py)
 
 Compiles the Xilinx VIP sources from the Vivado install, the generated VIP
-cores (made by hdl/gen_vip.tcl on first run), the DPI shims and tb_top.sv into
+cores (made by scripts/gen_vip.tcl on first run), the DPI shims and tb_top.sv into
 one library, and runs cocotb tests with lib/libaxis_dpi.so loaded by vsim
 (-sv_lib) and by cocotb (AXIS_DPI_LIB). With AXIS_VIP_SRC set, all VIP sources
 come from there instead and Vivado is not needed.
@@ -22,7 +22,7 @@ Environment (both runners):
     XILINX_VIVADO    Vivado install, e.g. /tools/xilinx/2025.2/Vivado
                      (default: found from `vivado` on PATH)
     AXIS_VIP_IP_DIRS ':'-separated sim/ dirs of your own generated VIP cores
-                     (default: build/ip/*/sim, generated with hdl/gen_vip.tcl)
+                     (default: build/ip/*/sim, generated with scripts/gen_vip.tcl)
     AXIS_DPI_LIB     DPI library (default: lib/libaxis_dpi.so from CMake, or
                      lib/libaxis_dpi_cov.so for a run with coverage)
     EXT_SHIMS_COVERAGE=0  no coverage in the functional tests under pytest
@@ -53,7 +53,7 @@ BUILD_DIR = REPO / "build" / "sim_build_questa"
 IP_DIR = REPO / "build" / "ip"
 BUILD_LOG = BUILD_DIR / "build.log"                        # copied into each runner's dir
 ARTIFACTS = TEST_ROOT / "artifacts"
-GEN_VIP_TCL = TEST_ROOT / "hdl" / "gen_vip.tcl"
+GEN_VIP_TCL = REPO / "scripts" / "gen_vip.tcl"
 
 TOPLEVEL = "tb_top"
 
@@ -96,7 +96,7 @@ def _vip_sources(vivado):
 
 
 def _generate_ip(vivado):
-    """Run hdl/gen_vip.tcl in Vivado batch mode into build/ip, again whenever
+    """Run scripts/gen_vip.tcl in Vivado batch mode into build/ip, again whenever
     the script is newer than its output (i.e. the interface changed)."""
     outs = [IP_DIR / n / "sim" / f"{n}.sv"
             for n in ("axi4stream_vip_mst", "axi4stream_vip_slv")]

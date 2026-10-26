@@ -1,19 +1,7 @@
 #!/usr/bin/env bash
 # Pack the AXI4-Stream VIP sources the Verilator flow needs into one base64
 # string, for the CI secret AXIS_VIP_SRC_TXZ_B64 (see .github/workflows/ci.yml).
-#
-#   scripts/pack_vip_secret.sh [OUT]      default OUT: build/axis_vip_src.txz.b64
-#
-# Needs Vivado (XILINX_VIVADO, or vivado on PATH). Generates the VIP cores into
-# build/ip first if needed, exactly as the runners do. The result must stay
-# below GitHub's 48 KB secret limit; the script checks.
-#
-# Then: Settings > Secrets and variables > Actions > New repository secret,
-# name AXIS_VIP_SRC_TXZ_B64, paste the file's contents. Or, with the gh CLI:
-#   gh secret set AXIS_VIP_SRC_TXZ_B64 < build/axis_vip_src.txz.b64
-#
-# The output contains Xilinx sources: don't commit it, and check that the
-# Xilinx licence allows this use.
+
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

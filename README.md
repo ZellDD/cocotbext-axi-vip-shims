@@ -139,7 +139,7 @@ file**, so that they share one instance table. If they don't, the first call
 
 - Vivado with the AXI4-Stream VIP. You need a master and a slave VIP
   customised for your interface. For the test bench,
-  [gen_vip.tcl](test/axi_vip_shims/axi_stream_vip_shims/hdl/gen_vip.tcl)
+  [gen_vip.tcl](scripts/gen_vip.tcl)
   generates them in Vivado batch mode.
 - A simulator that supports DPI-C and that cocotb can drive, and that handles
   the Xilinx VIP's SystemVerilog classes. Tested with:

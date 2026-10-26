@@ -1,10 +1,11 @@
-# gen_vip.tcl -- generate the AXI4-Stream VIP cores tb_top.sv instantiates.
+# gen_vip.tcl -- generate the AXI4-Stream VIP cores that
+# test/axi_vip_shims/axi_stream_vip_shims/hdl/tb_top.sv instantiates.
 #
 #   vivado -mode batch -source gen_vip.tcl -tclargs <out_dir> [part]
 #
 # Creates <out_dir>/axi4stream_vip_mst/sim and <out_dir>/axi4stream_vip_slv/sim
 # (the dirs AXIS_VIP_IP_DIRS points at). The interface must match tb_top.sv,
-# the shim parameters and IFACE in test_axis_vip.py:
+# the shim parameters and IFACE in test_cases/test_axis_vip.py:
 #   TDATA 4 bytes, TKEEP, TSTRB, TLAST, TID/TDEST/TUSER 4 bits
 
 set out_dir [file normalize [lindex $argv 0]]

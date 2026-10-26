@@ -11,11 +11,6 @@
 #                   pull request from a fork, which never gets secrets).
 #
 # Questa isn't run in CI (no licence for a CI machine).
-#
-# Setting up the secret: run scripts/pack_vip_secret.sh on a machine with
-# Vivado, then store its output as the repository secret AXIS_VIP_SRC_TXZ_B64
-# (Settings > Secrets and variables > Actions). Redo this when the VIP version
-# or hdl/gen_vip.tcl changes.
 
 # =================================================================== workflow
 name: CI
@@ -122,7 +117,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Secret AXIS_VIP_SRC_TXZ_B64 not available: Verilator simulation skipped"
+            echo "::notice::Secret AXIS_VIP_SRC_TXZ_B64 not available: Simulation skipped"
           fi
 
   # =========================================================== job: verilator
