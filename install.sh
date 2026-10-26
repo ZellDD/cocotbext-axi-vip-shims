@@ -8,9 +8,12 @@
 #                                   Vivado: a directory or a .f file list (see
 #                                   AXIS_VIP_SRC in questa_common.py)
 #
-# The Questa simulation tests (test_axis_vip_questa_runner.py) run only when vsim is on PATH
-# and VIP sources are available: --vip-src, or Vivado (XILINX_VIVADO, or
-# vivado on PATH), from which it generates the VIP cores into build/ip.
+# The simulation tests of each simulator run only when it is on PATH and VIP
+# sources are available: --vip-src, or Vivado (XILINX_VIVADO, or vivado on
+# PATH), from which they generate the VIP cores into build/ip.
+#   Questa      vsim        test_axis_vip_questa_runner.py
+#   Verilator   verilator   test_axis_vip_verilator_runner.py (5.052 or newer)
+# The benchmarks run only with BENCH=1 (see README.md).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -22,7 +25,7 @@ while [ $# -gt 0 ]; do
         --vip-src)   [ $# -ge 2 ] || { echo "--vip-src needs a path" >&2; exit 2; }
                      AXIS_VIP_SRC=$2; shift ;;
         --vip-src=*) AXIS_VIP_SRC=${1#--vip-src=} ;;
-        -h|--help)   sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)   sed -n '2,/^set /{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)           echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -48,8 +51,8 @@ if [ ! -x .venv/bin/python ]; then
     python3 -m venv .venv
 fi
 PY=.venv/bin/python
-"$PY" -m pip install --quiet --upgrade pip
-"$PY" -m pip install --quiet -r requirements.txt
+"$PY" -m pip install --upgrade pip
+"$PY" -m pip install -r requirements.txt
 "$PY" -c 'import cocotb; print("  cocotb", cocotb.__version__)'
 
 # ---------------------------------------------------------------- git hooks
@@ -70,22 +73,40 @@ ls lib/*.so | sed 's/^/  /'
 
 # ---------------------------------------------------------------- tests
 step "Running tests"
+RUNNERS=test/axi_vip_shims/axi_stream_vip_shims/python
 PYTEST_ARGS=(-s)
-if ! command -v vsim >/dev/null; then
-    SKIP_WHY="vsim not on PATH"
-elif [ -n "${AXIS_VIP_SRC:-}" ]; then
-    echo "  Questa found, VIP sources from $AXIS_VIP_SRC: including the simulation test"
+if [ -n "${AXIS_VIP_SRC:-}" ]; then
+    VIP="VIP sources from $AXIS_VIP_SRC"
 elif [ -n "${XILINX_VIVADO:-}" ] || command -v vivado >/dev/null; then
-    echo "  Questa + Vivado found: including the simulation test"
+    VIP="VIP sources from Vivado"
 else
-    SKIP_WHY="no VIP sources (pass --vip-src, or put vivado on PATH)"
+    VIP=
 fi
-if [ -n "${SKIP_WHY:-}" ]; then
-    echo "  skipping the Questa simulation test: $SKIP_WHY"
-    PYTEST_ARGS+=(
-        --deselect test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_questa_runner.py
-        --deselect test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_runner.py)
-fi
+
+# simulator NAME EXE RUNNER...: keep its runners when EXE is on PATH and VIP
+# sources are available, else deselect them
+simulator() {
+    local name=$1 exe=$2 why= r
+    shift 2
+    if ! command -v "$exe" >/dev/null; then
+        why="$exe not on PATH"
+    elif [ -z "$VIP" ]; then
+        why="no VIP sources (pass --vip-src, or put vivado on PATH)"
+    fi
+    if [ -z "$why" ]; then
+        echo "  $name ($(command -v "$exe")), $VIP: including its simulation tests"
+    else
+        echo "  skipping the $name simulation tests: $why"
+        for r in "$@"; do
+            PYTEST_ARGS+=(--deselect "$RUNNERS/$r")
+        done
+    fi
+}
+simulator Questa vsim \
+    test_axis_vip_questa_runner.py test_axis_benchmark_runner.py
+simulator Verilator verilator \
+    test_axis_vip_verilator_runner.py test_axis_benchmark_verilator_runner.py
+
 "$PY" -m pytest "${PYTEST_ARGS[@]}"
 
 step "Done"

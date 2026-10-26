@@ -369,7 +369,9 @@ variable unset, each log point costs one flag test.
   [Test artifacts](#test-artifacts)). Open a waveform with
   `vsim -view <path>/wlf/test_tdata.wlf`. Set `WAVES=0` to
   skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
-  test. `./install.sh` builds everything and runs both test sets.
+  test. `./install.sh` builds everything and runs the simulator-free test,
+  plus the simulation tests of each simulator (Questa, Verilator) that is on
+  `PATH`, provided VIP sources are available.
 
 - **Full simulation on Verilator**
   ([test_axis_vip_verilator_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py)):
