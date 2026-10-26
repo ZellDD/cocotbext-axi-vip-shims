@@ -1,7 +1,7 @@
 # gen_vip.tcl -- generate the AXI4-Stream VIP cores that
 # test/axi_vip_shims/axi_stream_vip_shims/hdl/tb_top.sv instantiates.
 #
-#   vivado -mode batch -source gen_vip.tcl -tclargs <out_dir> [part]
+#   vivado -mode batch -source gen_vip.tcl -tclargs <out_dir>
 #
 # Creates <out_dir>/axi4stream_vip_mst/sim and <out_dir>/axi4stream_vip_slv/sim
 # (the dirs AXIS_VIP_IP_DIRS points at). The interface must match tb_top.sv,
@@ -9,18 +9,14 @@
 #   TDATA 4 bytes, TKEEP, TSTRB, TLAST, TID/TDEST/TUSER 4 bits
 
 set out_dir [file normalize [lindex $argv 0]]
-if {$out_dir eq ""} { error "usage: -tclargs <out_dir> \[part\]" }
-
-# The VIP has no device primitives, so any installed part works.
-set part [lindex $argv 1]
-if {$part eq ""} {
-    set part [lindex [concat [get_parts -quiet xc7a35tcpg236-1] [get_parts]] 0]
-}
-puts "gen_vip: part $part, output $out_dir"
+if {$out_dir eq ""} { error "usage: -tclargs <out_dir>" }
 
 file delete -force $out_dir
 file mkdir $out_dir
-create_project -in_memory -part $part
+# No -part: Vivado picks a default from the installed devices, and the VIP has
+# no device primitives, so any part generates the same simulation sources.
+create_project -in_memory
+puts "gen_vip: part [get_property PART [current_project]], output $out_dir"
 
 set iface {
     CONFIG.TDATA_NUM_BYTES 4
