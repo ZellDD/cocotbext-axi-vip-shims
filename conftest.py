@@ -1,11 +1,9 @@
-import glob
 import os
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(
-    HERE, "src", "axi_vip_shims", "axi_stream_vip_shim", "src", "pyhon"))
+    HERE, "src", "axi_vip_shims", "axi_stream_vip_shim", "src", "python"))
 
 # cocotb test modules: run inside the simulator, started by the runners in
 # test/**/python/ (test_axis_vip_questa_runner.py, test_axis_benchmark_runner.py)
@@ -14,44 +12,46 @@ collect_ignore_glob = ["test/**/test_cases/*",
                        "examples/*"]
 
 
-# ------------------------------------------------------------- C coverage
-# Python coverage comes from pytest-cov (pytest.ini, .coveragerc). For
-# axis_dpi.cpp, lib/libaxis_dpi_test.so is built with --coverage
-# (AXI_VIP_SHIMS_TEST_COVERAGE): its counters are reset here at the start and
-# reported with gcovr at the end, when test_c_side.py has loaded it.
-BUILD = os.path.join(HERE, "build")
-C_REPORT = os.path.join(BUILD, "coverage", "c", "index.html")
-C_XML = os.path.join(BUILD, "coverage", "c", "coverage.xml")       # Cobertura
+# --------------------------------------------------------------- coverage
+# Python coverage comes from pytest-cov (pytest.ini, .coveragerc), which also
+# combines the simulators' data. C and SV coverage (coverage_common.py): reset
+# at the start, reported at the end.
+sys.path.insert(0, os.path.join(HERE, "test", "axi_vip_shims", "axi_stream_vip_shims",
+                                "python"))
+import coverage_common  # noqa: E402
 
 
-def _gcda_files():
-    return glob.glob(os.path.join(BUILD, "**", "axis_dpi_test.dir", "**", "*.gcda"),
-                     recursive=True)
+def _off():
+    return os.environ.get("EXT_SHIMS_COVERAGE", "1") == "0"
+
+
+def pytest_configure(config):
+    # EXT_SHIMS_COVERAGE=0: also pytest-cov (switched on in pytest.ini), as
+    # --no-cov would. It reads its options from the early-parsed namespace,
+    # at session start.
+    if _off():
+        config.known_args_namespace.no_cov = True
 
 
 def pytest_sessionstart(session):
-    for f in _gcda_files():
-        os.remove(f)
+    coverage_common.reset()
 
 
 def pytest_terminal_summary(terminalreporter):
-    axis_vip_dpi = sys.modules.get("axis_vip_dpi")
-    dumps = [lib.mock_gcov_dump for lib in getattr(axis_vip_dpi, "_libs", {}).values()
-             if hasattr(lib, "mock_gcov_dump")]
-    if not dumps:
-        return                            # test library not loaded, or no --coverage
-    for dump in dumps:
-        dump()                            # else written only at process exit
-
-    tr = terminalreporter
-    tr.section("C coverage (gcovr)")
-    os.makedirs(os.path.dirname(C_REPORT), exist_ok=True)
-    res = subprocess.run(
-        [sys.executable, "-m", "gcovr", "--root", HERE, "--filter", "src/",
-         "--txt", "-", "--html-details", C_REPORT, "--cobertura", C_XML, BUILD],
-        capture_output=True, text=True)
-    if res.returncode:
-        tr.write_line(f"gcovr failed ({res.returncode}): {res.stderr.strip()}")
+    if _off():
         return
-    tr.write(res.stdout)
-    tr.write_line(f"HTML: {C_REPORT}")
+    # test_c_side.py's library is loaded in this process, so its counters
+    # would only be written at exit, after this report: write them now.
+    axis_vip_dpi = sys.modules.get("axis_vip_dpi")
+    for lib in getattr(axis_vip_dpi, "_libs", {}).values():
+        if hasattr(lib, "mock_gcov_dump"):
+            lib.mock_gcov_dump()
+    try:
+        sections = coverage_common.report()
+    except RuntimeError as e:
+        terminalreporter.section("coverage")
+        terminalreporter.write_line(f"coverage report failed: {e}")
+        return
+    for title, text in sections:
+        terminalreporter.section(title)
+        terminalreporter.write(text)

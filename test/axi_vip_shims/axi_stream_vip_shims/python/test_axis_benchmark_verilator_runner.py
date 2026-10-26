@@ -9,9 +9,9 @@ benchmark.txt. Everything goes to artifacts/test_axis_benchmark_verilator_runner
     BENCH=1 pytest test_axis_benchmark_verilator_runner.py -s
                      (skipped without BENCH=1 or without verilator on PATH)
 
-The model is built without --trace (WAVES=0) so tracing support doesn't slow
-it down, unless the functional Verilator runner built it first in the same
-process.
+The model is built without --trace (WAVES=0) and without coverage, so
+neither slows it down. It lives in build/sim_build_verilator; the functional
+runner's instrumented model is in build/sim_build_verilator_cov.
 
 Environment (plus the shared ones in verilator_common.py):
     BENCH_BEATS      beats per case (default 10240)

@@ -10,6 +10,9 @@ Environment (plus the shared ones in questa_common.py):
                      wlf/<test>.wlf; view with `vsim -view <file>`)
     GUI=1            open the Questa GUI (all selected tests in one session)
     TESTCASE         run only these tests (comma-separated)
+    EXT_SHIMS_COVERAGE=0  no coverage under pytest (default: C, SV and Python,
+                          reported at the end and into build/coverage/, see
+                          coverage_common.py; never when run as a script)
 """
 import os
 import sys

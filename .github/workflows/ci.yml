@@ -79,7 +79,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coverage-unit-py${{ matrix.python }}
-          path: build/coverage/
+          path: |
+            build/coverage/
+            !build/coverage/raw/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -193,15 +195,17 @@ jobs:
           { echo "### Verilator benchmark"; echo '```'; cat "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       # -------------------------------------------------------- artifacts
-      # Logs, benchmark tables and coverage reports only. The VIP sources stay
-      # in RUNNER_TEMP, and the rest of build/ (with the patched checker copy)
-      # is not uploaded.
+      # Logs, benchmark tables and coverage reports (Python, C and SV) only.
+      # The VIP sources stay in RUNNER_TEMP, and the rest of build/ (with the
+      # patched checker copy) is not uploaded.
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-verilator
-          path: build/coverage/
+          path: |
+            build/coverage/
+            !build/coverage/raw/
           if-no-files-found: ignore
           retention-days: 14
 

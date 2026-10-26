@@ -29,7 +29,8 @@ OUT = artifact_dir(__file__)
 
 
 def benchmark(run=run_questa, out=OUT, sim="vsim"):
-    """Runs the cases with run(testcase, module, out, waves, env) and writes the
+    """Runs the cases with run(testcase, module, out, waves, env, coverage),
+    never with coverage (it would skew the timings), and writes the
     table to out/benchmark.txt; sim names the simulator in the note. Returns
     (table, results.xml paths)."""
     repeats = int(os.environ.get("BENCH_REPEATS", 3))
@@ -39,7 +40,7 @@ def benchmark(run=run_questa, out=OUT, sim="vsim"):
     for _ in range(repeats):             # interleaved, so drift hits every case
         for t in cocotb_tests(MODULE):
             xml = run(t, MODULE, out, waves=False,
-                      env={"BENCH_RESULT_DIR": str(result_dir)})
+                      env={"BENCH_RESULT_DIR": str(result_dir)}, coverage=False)
             xmls.append(xml)
             f = result_dir / f"{t}.json"
             if f.is_file():

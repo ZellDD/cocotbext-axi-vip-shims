@@ -23,7 +23,10 @@ Environment (both runners):
                      (default: found from `vivado` on PATH)
     AXIS_VIP_IP_DIRS ':'-separated sim/ dirs of your own generated VIP cores
                      (default: build/ip/*/sim, generated with hdl/gen_vip.tcl)
-    AXIS_DPI_LIB     DPI library (default: lib/libaxis_dpi.so from CMake)
+    AXIS_DPI_LIB     DPI library (default: lib/libaxis_dpi.so from CMake, or
+                     lib/libaxis_dpi_cov.so for a run with coverage)
+    EXT_SHIMS_COVERAGE=0  no coverage in the functional tests under pytest
+                     (see coverage_common.py)
 
 Artifacts: each runner writes into its own artifacts/<runner>/ (named after the
 runner script, see artifact_dir): build.log, logs/<test>.log, wlf/<test>.wlf.
@@ -38,6 +41,8 @@ import sys
 from pathlib import Path
 
 from cocotb_tools.runner import get_runner
+
+import coverage_common
 
 HERE = Path(__file__).resolve().parent
 TEST_ROOT = HERE.parent                                    # .../axi_stream_vip_shims
@@ -168,9 +173,11 @@ def _user_vip_sources(path):
     return sorted(files.values(), key=rank), incs
 
 
-def _dpi_lib():
-    """Same file for vsim and cocotb, or the shims never meet cocotb."""
-    lib = Path(os.environ.get("AXIS_DPI_LIB", REPO / "lib" / "libaxis_dpi.so"))
+def _dpi_lib(coverage=False):
+    """Same file for vsim and cocotb, or the shims never meet cocotb. With
+    coverage, the gcov-instrumented build of the same code."""
+    default = coverage_common.COV_LIB if coverage else REPO / "lib" / "libaxis_dpi.so"
+    lib = Path(os.environ.get("AXIS_DPI_LIB", default))
     if not lib.is_file():
         raise SystemExit(f"{lib} not found -- build it with "
                          "'cmake -B build && cmake --build build'")
@@ -223,21 +230,24 @@ def build():
 
     # The runner hands vsim its own sys.path as PYTHONPATH (extra_env's is
     # overwritten), so the test modules and axis_vip_dpi must be on it.
-    for p in (str(SHIM / "pyhon"), str(TEST_CASES)):
+    for p in (str(SHIM / "python"), str(TEST_CASES)):
         if p not in sys.path:
             sys.path.insert(0, p)
     return runner
 
 
-def run_questa(testcase, module, out, waves=None, env=None):
+def run_questa(testcase, module, out, waves=None, env=None, coverage=None):
     """Run one cocotb test (or a list, in one vsim). out is the runner's
     artifact_dir(): the log goes to out/logs/<name>.log, the waves to
     out/wlf/<name>.wlf, the build log to out/build.log. env is added to the
-    test's environment. Returns the results.xml path."""
+    test's environment. coverage: collect it (default: under pytest, see
+    coverage_common.py). Returns the results.xml path."""
     runner = build()
     copy_build_log(BUILD_LOG, out)
     log_dir, wave_dir = out / "logs", out / "wlf"
-    lib = _dpi_lib()
+    if coverage is None:
+        coverage = coverage_common.enabled()
+    lib = _dpi_lib(coverage)
     names = [testcase] if isinstance(testcase, str) else list(testcase)
     name = names[0] if len(names) == 1 else "tests"
     if waves is None:
@@ -247,7 +257,14 @@ def run_questa(testcase, module, out, waves=None, env=None):
     # -dpioutoftheblue: cocotb calls the shims' DPI exports from VPI
     # callbacks, i.e. not from inside an SV import call chain.
     args = ["-sv_lib", str(lib.with_suffix("")), "-dpioutoftheblue", "1",
-            "-voptargs=+acc", "-t", "1ps"]
+            "-t", "1ps"]
+    voptargs, pre_cmd = "+acc", None
+    if coverage:
+        cover, cov_args, pre_cmd = coverage_common.questa_args(name)
+        voptargs += " " + cover
+        args += cov_args
+        env = {**coverage_common.cocotb_env(), **(env or {})}
+    args.append(f"-voptargs={voptargs}")
     if waves:
         wave_dir.mkdir(parents=True, exist_ok=True)
         args += ["-wlf", str(wave_dir / f"{name}.wlf")]
@@ -263,6 +280,7 @@ def run_questa(testcase, module, out, waves=None, env=None):
         extra_env={"AXIS_DPI_LIB": str(lib), "BENCH_NAME": name, **(env or {})},
         results_xml=str(BUILD_DIR / f"{name}.results.xml"),   # pytest wants absolute
         log_file=log_dir / f"{name}.log",
+        pre_cmd=pre_cmd,
         waves=waves,
         gui=os.environ.get("GUI") == "1",
     )

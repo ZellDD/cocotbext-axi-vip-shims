@@ -14,6 +14,9 @@ Environment (plus the shared ones in verilator_common.py):
     GUI=1            open the waves in gtkwave after the run (all selected
                      tests in one model run)
     TESTCASE         run only these tests (comma-separated)
+    EXT_SHIMS_COVERAGE=0  no coverage under pytest (default: C, SV and Python,
+                          reported at the end and into build/coverage/, see
+                          coverage_common.py; never when run as a script)
 """
 import os
 import shutil

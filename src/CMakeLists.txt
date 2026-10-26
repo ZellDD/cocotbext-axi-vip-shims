@@ -26,6 +26,6 @@ set(AXI_VIP_SHIMS_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../test")
 option(AXI_VIP_SHIMS_BUILD_TEST_LIBS
        "Also build the simulator-free test libraries (DPI code + mock simulator)" ON)
 option(AXI_VIP_SHIMS_TEST_COVERAGE
-       "Build the test libraries with --coverage (gcov), reported by pytest" ON)
+       "Build the test libraries with --coverage (gcov), and libaxis_dpi_cov.so for the simulation tests" ON)
 
 add_subdirectory(axi_vip_shims/axi_stream_vip_shim)

@@ -21,7 +21,7 @@ from types import SimpleNamespace
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 SHIM = os.path.join(REPO, "src", "axi_vip_shims", "axi_stream_vip_shim", "src")
-sys.path.insert(0, os.path.join(SHIM, "pyhon"))
+sys.path.insert(0, os.path.join(SHIM, "python"))
 
 LIB = os.environ.get("AXIS_DPI_TEST_LIB",
                      os.path.join(REPO, "lib", "libaxis_dpi_test.so"))

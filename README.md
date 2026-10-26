@@ -123,7 +123,7 @@ sequenceDiagram
   a name → shim-instance table. It packs bytes into 4096-bit DPI vectors and
   calls the shim's exported functions with `svSetScope()` set to the right
   instance.
-- **cocotb front end** ([axis_vip_dpi.py](src/axi_vip_shims/axi_stream_vip_shim/src/pyhon/axis_vip_dpi.py)):
+- **cocotb front end** ([axis_vip_dpi.py](src/axi_vip_shims/axi_stream_vip_shim/src/python/axis_vip_dpi.py)):
   loads the same `.so` with `ctypes` and checks every call against the
   interface you declared.
 
@@ -148,7 +148,7 @@ src/axi_vip_shims/axi_stream_vip_shim/
   CMakeLists.txt
   src/hdl/axis_vip_dpi.sv        SV shims (master + slave)
   src/dpi_c/axis_dpi.cpp         DPI-C trampoline
-  src/pyhon/axis_vip_dpi.py      cocotb classes
+  src/python/axis_vip_dpi.py      cocotb classes
 examples/axis_byteswap/          standalone project using the shims (see [Examples](#examples))
 test/axi_vip_shims/axi_stream_vip_shims/
   hdl/tb_top.sv                  VIP master -> VIP slave loopback (+ plain bus for the benchmark)
@@ -167,7 +167,8 @@ test/axi_vip_shims/axi_stream_vip_shims/
                                  see [Test artifacts](#test-artifacts))
 lib/                             built shared libraries (generated)
 build/                           CMake build, generated VIP cores, Questa work library,
-                                 Verilator model (build/sim_build_verilator)
+                                 Verilator models (build/sim_build_verilator, _cov),
+                                 coverage reports (build/coverage)
 ```
 
 ## Requirements
@@ -197,11 +198,17 @@ This produces:
 
 - `libaxis_dpi.so`: load it in the simulator and in cocotb.
 - `libaxis_dpi_test.so`: `axis_dpi.cpp` linked with the mock. Used only by the
-  simulator-free test. Disable it with `-DAXI_VIP_SHIMS_BUILD_TEST_LIBS=OFF`.
-  It is built with `--coverage` (see [Coverage](#coverage)); turn that off with
-  `-DAXI_VIP_SHIMS_TEST_COVERAGE=OFF`. `libaxis_dpi.so` is never instrumented.
+  simulator-free test.
+- `libaxis_dpi_cov.so`: `libaxis_dpi.so` built with `--coverage`. The
+  functional simulation tests load it in place of `libaxis_dpi.so` (see
+  [Coverage](#coverage)).
 
-Both land in the top-level `lib/` (set by `AXI_VIP_SHIMS_LIB_DIR`).
+The two test libraries are built with `--coverage`. Turn that off with
+`-DAXI_VIP_SHIMS_TEST_COVERAGE=OFF` (then there's no `libaxis_dpi_cov.so`), or
+leave out both test libraries with `-DAXI_VIP_SHIMS_BUILD_TEST_LIBS=OFF`.
+`libaxis_dpi.so` is never instrumented.
+
+All of them land in the top-level `lib/` (set by `AXI_VIP_SHIMS_LIB_DIR`).
 
 The library is deliberately linked **without** `-Wl,--no-undefined`.
 `svGetScope` / `svSetScope` and the SV exports are resolved by the simulator at
@@ -403,7 +410,9 @@ variable unset, each log point costs one flag test.
 - **Full simulation on Verilator**
   ([test_axis_vip_verilator_runner.py](test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py)):
   the same tests and VIP sources, built into one Verilator model under
-  `build/sim_build_verilator/`:
+  `build/sim_build_verilator_cov/` under pytest (instrumented for
+  [Coverage](#coverage)), or `build/sim_build_verilator/` when run as a
+  script, with `EXT_SHIMS_COVERAGE=0`, and for the benchmark:
 
   ```sh
   python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py
@@ -423,28 +432,46 @@ variable unset, each log point costs one flag test.
 
 ### Coverage
 
-Every `pytest` run from the repo root reports coverage of the cocotb front end
-and of the C trampoline, at the end of the run:
+Every `pytest` (or `pytest -s`) run from the repo root reports coverage of
+all the shim code at the end of the run. The Xilinx VIP and any DUT are left
+out.
 
-- **Python** (`axis_vip_dpi.py`), with pytest-cov
-  ([pytest.ini](pytest.ini), [.coveragerc](.coveragerc)). It is measured in
-  the simulator-free test, and also inside the simulator during the
-  simulation tests (`patch = subprocess`). The numbers from both are
-  combined. HTML report: `build/coverage/python/index.html`.
-- **C** (`axis_dpi.cpp`), with gcov and gcovr. `lib/libaxis_dpi_test.so` is
-  built with `--coverage`, so only the simulator-free test contributes. The
-  library a simulator loads is not instrumented. [conftest.py](conftest.py)
-  resets the counters when the session starts and prints the gcovr table at
-  the end. HTML report: `build/coverage/c/index.html`.
+| Layer | Measured with | Where it runs | Report |
+|-------|---------------|---------------|--------|
+| Python `axis_vip_dpi.py` | pytest-cov ([pytest.ini](pytest.ini), [.coveragerc](.coveragerc)) in-process; cocotb's own coverage (`COCOTB_USER_COVERAGE`) inside the simulator; combined | `test_c_side.py`, functional simulation tests | `build/coverage/python/` |
+| C `axis_dpi.cpp` | gcov + gcovr: `libaxis_dpi_test.so` in-process, `libaxis_dpi_cov.so` in the simulator; combined | both | `build/coverage/c/` |
+| SV `axis_vip_dpi.sv`, `tb_top.sv` | Verilator `--coverage-line --coverage-expr`; Questa `+cover=bcse` | functional simulation tests | `build/coverage/sv_verilator/`, `build/coverage/sv_questa/` |
 
-Both also write a Cobertura XML report (`build/coverage/{python,c}/coverage.xml`)
-for tools such as Codecov or an IDE coverage view. CI uploads `build/coverage/`
-as an artifact: `coverage-unit-py<version>` from the simulator-free job, and
-`coverage-verilator` (Python only, measured inside the simulator) from the
-Verilator job.
+- Each simulation run saves its SV data into `build/coverage/raw/<sim>/<test>`.
+  At the end, the runs are merged (`verilator_coverage --write`,
+  `vcover merge`) and reported. Verilator gives an annotated source and an
+  lcov `coverage.info`; Questa gives an HTML report.
+- Only the shims and the bench are instrumented. Verilator gets a generated
+  `coverage.vlt` that switches coverage off for every Xilinx VIP file. Questa
+  selects the design units `axis_dpi_pkg`, `axis_vip_dpi_mst`,
+  `axis_vip_dpi_slv` and `tb_top`.
+- There is no toggle coverage. The shims pass 4096-bit DPI vectors, and their
+  unused upper bits would swamp the number.
+- The benchmarks never collect coverage, so it can't skew their timings. They
+  keep the uninstrumented `libaxis_dpi.so` and their own Verilator model.
+- Coverage is collected only under pytest (`pytest -s` from the repo root).
+  A runner started as a script (`python3 test_axis_vip_*_runner.py`) runs
+  without it. [conftest.py](conftest.py) resets the C and SV data when the
+  session starts. `EXT_SHIMS_COVERAGE=0` turns coverage off under pytest too.
+  The switch isn't called `COVERAGE`, because cocotb reads that name as a
+  (deprecated) switch for its own coverage.
+- The Python and C reports are also written as Cobertura XML
+  (`build/coverage/{python,c}/coverage.xml`), for tools such as Codecov or an
+  IDE coverage view.
 
-The SV shims aren't measured here. For HDL code coverage of your own DUT,
-see the [example](examples/axis_byteswap/README.md#coverage).
+CI uploads `build/coverage/` (without the raw data) as artifacts:
+`coverage-unit-py<version>` (Python and C, simulator-free) and
+`coverage-verilator` (all three layers, from the Verilator simulation).
+
+The shared code is in
+[coverage_common.py](test/axi_vip_shims/axi_stream_vip_shims/python/coverage_common.py).
+For HDL coverage of your own DUT, see the
+[example](examples/axis_byteswap/README.md#coverage).
 
 ### Test artifacts
 
@@ -461,8 +488,10 @@ artifacts/
 ```
 
 - `build.log` is the log of the build this run used. The Questa runners share
-  one build in `build/sim_build_questa/`, and the Verilator runners share one in
-  `build/sim_build_verilator/`, so the same log can show up in two directories.
+  one build in `build/sim_build_questa/`, so the same log can show up in two
+  directories. The Verilator runners build into `build/sim_build_verilator_cov/`
+  (functional tests under pytest, with coverage) and `build/sim_build_verilator/`
+  (benchmark, script runs, or `EXT_SHIMS_COVERAGE=0`).
 - `results/` holds each benchmark case's `<test>.json` while the runner
   collects it into `benchmark.txt`.
 

@@ -41,7 +41,7 @@ You need Vivado (for the Xilinx VIP sources), CMake, a C/C++ compiler, cocotb
 cd examples/axis_byteswap
 pytest                                   # Verilator
 SIM=questa pytest                        # Questa
-python3 tests/test_byteswap_runner.py    # without pytest, prints a summary
+python3 tests/test_byteswap_runner.py    # without pytest or coverage, prints a summary
 TESTCASE=test_partial_last_beat WAVES=1 pytest
 ```
 
@@ -51,8 +51,10 @@ cocotb tests in a single simulation.
 
 ## Coverage
 
-Every run measures code coverage of the DUT (`rtl/`) and prints a summary at
-the end. `COVERAGE=0` turns it off.
+Every `pytest` (or `pytest -s`) run measures code coverage of the DUT
+(`rtl/`) and prints a summary at the end. `DUT_COVERAGE=0` turns it off.
+`python3 tests/test_byteswap_runner.py` runs without coverage. (Not `COVERAGE`: cocotb reads that
+one as its own switch for coverage of the Python test code.)
 
 ```
 =========================== DUT coverage (verilator) ===========================
@@ -98,7 +100,7 @@ You use three files from the shims, all under
 |------|---------|-----|
 | `CMakeLists.txt` (via `src/CMakeLists.txt`) | CMake | `add_subdirectory` builds `libaxis_dpi.so` |
 | `src/hdl/axis_vip_dpi.sv` | simulator | compiled with your bench, after the VIP sources |
-| `src/pyhon/axis_vip_dpi.py` | cocotb | put its directory on the Python path |
+| `src/python/axis_vip_dpi.py` | cocotb | put its directory on the Python path |
 
 ### 2. Build the DPI library from your CMake
 
@@ -181,7 +183,7 @@ sink = AXIS_SLAVE_VIP("sink", dut.sink_shim, **IFACE)
 ```
 
 The cocotb runner passes its own `sys.path` to the simulator as `PYTHONPATH`.
-So add the shims' `src/pyhon` directory and your test directory to `sys.path`
+So add the shims' `src/python` directory and your test directory to `sys.path`
 before you call `runner.test()`; setting `PYTHONPATH` in `extra_env` gets
 overwritten.
 

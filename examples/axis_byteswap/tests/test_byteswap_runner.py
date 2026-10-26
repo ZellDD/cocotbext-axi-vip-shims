@@ -1,7 +1,7 @@
 """Build and run tests/test_byteswap.py on Verilator (default) or Questa.
 
     pytest                                  (from examples/axis_byteswap/)
-    python3 tests/test_byteswap_runner.py   same, without pytest
+    python3 tests/test_byteswap_runner.py   same, without pytest (and coverage)
 
 Everything this project takes from cocotbext-axi-vip-shims is referenced
 from AXI_VIP_SHIMS_DIR:
@@ -9,7 +9,7 @@ from AXI_VIP_SHIMS_DIR:
     src/axi_vip_shims/axi_stream_vip_shim/
       CMakeLists.txt            -> libaxis_dpi.so, via ../CMakeLists.txt
       src/hdl/axis_vip_dpi.sv   -> compiled with the bench
-      src/pyhon/axis_vip_dpi.py -> imported by the cocotb tests
+      src/python/axis_vip_dpi.py -> imported by the cocotb tests
 
 Environment:
     AXI_VIP_SHIMS_DIR  the shims checkout (default: this repo, two levels up;
@@ -18,8 +18,9 @@ Environment:
                        for the Xilinx VIP sources and to generate the cores
     SIM                verilator (default) or questa
     WAVES=1            record waves into build/sim_<SIM>/
-    COVERAGE=0         no code coverage (default: on, for the DUT in rtl/ only;
-                       report in build/sim_<SIM>/coverage/)
+    DUT_COVERAGE=0     no code coverage under pytest (default: on, for the DUT
+                       in rtl/ only, report in build/sim_<SIM>/coverage/;
+                       never when run as a script)
     TESTCASE           run only these cocotb tests (comma-separated)
 
 build/ holds everything generated: build/lib/libaxis_dpi.so, the VIP cores in
@@ -126,7 +127,10 @@ def patch_checker_for_verilator(src):
 
 # ---------------------------------------------------------------- coverage
 def coverage():
-    return os.environ.get("COVERAGE", "1") != "0"
+    """Under pytest (PYTEST_CURRENT_TEST is set while a test runs), unless
+    DUT_COVERAGE=0."""
+    return ("PYTEST_CURRENT_TEST" in os.environ
+            and os.environ.get("DUT_COVERAGE", "1") != "0")
 
 
 def verilator_coverage_config(sources, includes):
@@ -168,7 +172,6 @@ def coverage_report():
     banner = ("Questa", "Start time", "vcover report", "End time", "Errors:")
     out = "\n".join(l for l in out.strip().splitlines() if not l.startswith(banner))
     COV_SUMMARY.write_text(out.strip() + f"\nDetails: {COV_DIR}\n")
-    print(COV_SUMMARY.read_text())
 
 
 # ------------------------------------------------------------------- build
@@ -227,7 +230,7 @@ def run(testcase=None):
     runner = build()
     # The runner hands the simulator its own sys.path as PYTHONPATH, so the
     # cocotb test module and axis_vip_dpi.py must be on it.
-    for p in (str(SHIM_SRC / "pyhon"), str(TESTS)):
+    for p in (str(SHIM_SRC / "python"), str(TESTS)):
         if p not in sys.path:
             sys.path.insert(0, p)
 
