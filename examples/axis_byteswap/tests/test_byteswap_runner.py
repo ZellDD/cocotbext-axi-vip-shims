@@ -116,7 +116,7 @@ def vip_sources(viv):
 def patch_checker_for_verilator(src):
     """Verilator crashes on the protocol checker's tri0/tri1 input ports; a
     copy with them as plain wires behaves the same (the VIP drives them all).
-    See "Verilator notes" in the shims' README.md."""
+    """
     text = re.sub(r"^(\s*input\s+)tri[01]\b", r"\1wire", src.read_text(),
                   flags=re.MULTILINE)
     dst = SIM_BUILD / "patched_vip" / src.name

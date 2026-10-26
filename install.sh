@@ -13,7 +13,7 @@
 # PATH), from which they generate the VIP cores into build/ip.
 #   Questa      vsim        test_axis_vip_questa_runner.py
 #   Verilator   verilator   test_axis_vip_verilator_runner.py (5.052 or newer)
-# The benchmarks run only with BENCH=1 (see README.md).
+# The benchmarks run only with BENCH=1.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"

@@ -169,7 +169,7 @@ and cocotb must use **the same file**.
 | Other flags | `--timing --assert -Wno-fatal -Wno-lint -Wno-style` | `-dpioutoftheblue 1 -voptargs=+acc` |
 | Extra step | patched copy of the protocol checker (`tri0`/`tri1` → `wire`) | — |
 
-The shims' main [README](../../README.md#verilator-notes) explains each of
+The shims' [Verilator notes](../../doc/verilator_notes.md) explain each of
 these.
 
 ### 5. The cocotb side

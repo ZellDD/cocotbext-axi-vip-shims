@@ -7,9 +7,6 @@ Verilator resolves DPI at link time, so lib/libaxis_dpi.so is linked into the
 model (with an rpath) instead of loaded with -sv_lib; cocotb then opens the
 same file through AXIS_DPI_LIB and gets the already-loaded copy.
 
-The Xilinx protocol checker is compiled with --assert, from a patched copy
-(see _patch_checker). Known not to build with Verilator 5.032, see "Verilator
-notes" in README.md.
 
 With coverage (the functional tests, see coverage_common.py), the model is
 instrumented and linked against lib/libaxis_dpi_cov.so, so it is built in its

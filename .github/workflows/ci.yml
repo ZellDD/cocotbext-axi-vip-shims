@@ -89,8 +89,8 @@ jobs:
         run: nm -D --defined-only lib/libaxis_dpi.so | grep ' T axis_dpi_'
 
       # ------------------------------------------------------------ artifacts
-      # Everything the tests write goes to $TEST_DIR/artifacts/ (see "Test
-      # artifacts" in README.md); here: the Python and C coverage reports.
+      # Everything the tests write goes to $TEST_DIR/artifacts
+      # here: the Python and C coverage reports.
       - name: Upload unit artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -190,10 +190,6 @@ jobs:
         run: ./install.sh --no-tests
 
       # ---------------------------------------------------------------- tests
-      # test_flush_slave is a known failure on Verilator (see README), so it
-      # is deselected to keep the job meaningful; drop that line once fixed.
-      # Debug log on (cocotb -> DPI -> SV, see "Debug log" in README.md), so a
-      # failure can be followed in the uploaded logs. Not for the benchmark.
       - name: Functional tests on Verilator
         env:
           AXIS_DPI_DEBUG: "1"
