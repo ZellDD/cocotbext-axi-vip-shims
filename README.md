@@ -149,7 +149,7 @@ file**, so that they share one instance table. If they don't, the first call
 
   GHDL (VHDL only) doesn't work (see [Other simulators](#other-simulators)).
 - Python 3 and cocotb.
-- A C99 and a C++17 compiler, and CMake ≥ 3.16.
+- A C++17 compiler and CMake ≥ 3.16.
 
 ## Building the DPI library
 

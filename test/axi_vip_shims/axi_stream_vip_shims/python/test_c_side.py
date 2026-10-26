@@ -1,6 +1,6 @@
 """Simulator-free test of axis_dpi.cpp + axis_vip_dpi.py.
 
-Loads lib/libaxis_dpi_test.so: axis_dpi.cpp linked with test_c_side_mock.c,
+Loads lib/libaxis_dpi_test.so: axis_dpi.cpp linked with test_c_side_mock.cpp,
 which plays the simulator and the SV shims (per-instance queues behind the
 exported functions, and a svSetScope that must have selected the right
 instance). Build it first, then run:

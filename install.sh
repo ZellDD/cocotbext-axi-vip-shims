@@ -40,7 +40,7 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- tools
 step "Checking tools"
-for tool in cmake cc python3; do
+for tool in cmake c++ python3; do
     command -v "$tool" >/dev/null || die "$tool not found on PATH"
     printf '  %-8s %s\n' "$tool" "$(command -v "$tool")"
 done

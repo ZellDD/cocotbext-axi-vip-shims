@@ -6,15 +6,12 @@
 # Libraries land in lib/ (AXI_VIP_SHIMS_LIB_DIR). Point the simulator's
 # -sv_lib and cocotb's AXIS_DPI_LIB at the same file there.
 cmake_minimum_required(VERSION 3.16)
-project(axi_vip_shims LANGUAGES C CXX)
+project(axi_vip_shims LANGUAGES CXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

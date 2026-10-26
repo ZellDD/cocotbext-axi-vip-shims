@@ -5,6 +5,6 @@
 #
 # The libraries are defined in src/.
 cmake_minimum_required(VERSION 3.16)
-project(cocotbext_axi_vip_shims LANGUAGES C CXX)
+project(cocotbext_axi_vip_shims LANGUAGES CXX)
 
 add_subdirectory(src)

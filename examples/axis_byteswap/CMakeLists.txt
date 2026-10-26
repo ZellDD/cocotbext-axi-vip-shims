@@ -9,7 +9,7 @@
 #
 #   cmake -B build -DAXI_VIP_SHIMS_DIR=third_party/cocotbext-axi-vip-shims
 cmake_minimum_required(VERSION 3.16)
-project(axis_byteswap_example LANGUAGES C CXX)
+project(axis_byteswap_example LANGUAGES CXX)
 
 set(AXI_VIP_SHIMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.."
     CACHE PATH "cocotbext-axi-vip-shims checkout")
