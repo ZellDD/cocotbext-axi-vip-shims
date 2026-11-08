@@ -230,7 +230,7 @@ def build():
 
     # The runner hands vsim its own sys.path as PYTHONPATH (extra_env's is
     # overwritten), so the test modules and axis_vip_dpi must be on it.
-    for p in (str(SHIM / "python"), str(TEST_CASES)):
+    for p in (str(SHIM / "cocotb_api"), str(TEST_CASES)):
         if p not in sys.path:
             sys.path.insert(0, p)
     return runner

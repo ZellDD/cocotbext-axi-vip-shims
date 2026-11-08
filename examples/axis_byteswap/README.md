@@ -100,7 +100,7 @@ You use three files from the shims, all under
 |------|---------|-----|
 | `CMakeLists.txt` (via `src/CMakeLists.txt`) | CMake | `add_subdirectory` builds `libaxis_dpi.so` |
 | `src/hdl/axis_vip_dpi.sv` | simulator | compiled with your bench, after the VIP sources |
-| `src/python/axis_vip_dpi.py` | cocotb | put its directory on the Python path |
+| `src/cocotb_api/axis_vip_dpi.py` | cocotb | put its directory on the Python path |
 
 ### 2. Build the DPI library from your CMake
 
@@ -183,7 +183,7 @@ sink = AXIS_SLAVE_VIP("sink", dut.sink_shim, **IFACE)
 ```
 
 The cocotb runner passes its own `sys.path` to the simulator as `PYTHONPATH`.
-So add the shims' `src/python` directory and your test directory to `sys.path`
+So add the shims' `src/cocotb_api` directory and your test directory to `sys.path`
 before you call `runner.test()`; setting `PYTHONPATH` in `extra_env` gets
 overwritten.
 

@@ -9,7 +9,7 @@ from AXI_VIP_SHIMS_DIR:
     src/axi_vip_shims/axi_stream_vip_shim/
       CMakeLists.txt            -> libaxis_dpi.so, via ../CMakeLists.txt
       src/hdl/axis_vip_dpi.sv   -> compiled with the bench
-      src/python/axis_vip_dpi.py -> imported by the cocotb tests
+      src/cocotb_api/axis_vip_dpi.py -> imported by the cocotb tests
 
 Environment:
     AXI_VIP_SHIMS_DIR  the shims checkout (default: this repo, two levels up;
@@ -230,7 +230,7 @@ def run(testcase=None):
     runner = build()
     # The runner hands the simulator its own sys.path as PYTHONPATH, so the
     # cocotb test module and axis_vip_dpi.py must be on it.
-    for p in (str(SHIM_SRC / "python"), str(TESTS)):
+    for p in (str(SHIM_SRC / "cocotb_api"), str(TESTS)):
         if p not in sys.path:
             sys.path.insert(0, p)
 

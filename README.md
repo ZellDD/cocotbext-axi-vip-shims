@@ -123,7 +123,7 @@ sequenceDiagram
   a name → shim-instance table. It packs bytes into 4096-bit DPI vectors and
   calls the shim's exported functions with `svSetScope()` set to the right
   instance.
-- **cocotb front end** ([axis_vip_dpi.py](src/axi_vip_shims/axi_stream_vip_shim/src/python/axis_vip_dpi.py)):
+- **cocotb front end** ([axis_vip_dpi.py](src/axi_vip_shims/axi_stream_vip_shim/src/cocotb_api/axis_vip_dpi.py)):
   loads the same `.so` with `ctypes` and checks every call against the
   interface you declared.
 

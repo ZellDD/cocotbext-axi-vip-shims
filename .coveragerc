@@ -4,7 +4,7 @@
 # tests, where cocotb collects it (see cocotb_env in coverage_common.py);
 # pytest-cov combines both.
 [run]
-source = src/axi_vip_shims/axi_stream_vip_shim/src/python
+source = src/axi_vip_shims/axi_stream_vip_shim/src/cocotb_api
 data_file = build/.coverage
 # a run with no simulator test and no test_c_side.py collects nothing
 disable_warnings = no-data-collected, module-not-imported
