@@ -20,7 +20,8 @@ first use.
 `name` must equal the shim's NAME parameter; `shim` is the cocotb handle of
 the shim instance. Waiting (get_transaction / wait_idle) sleeps on a status
 signal the shim drives, so a quiet interface costs no clock-edge wakeups.
-There is no timeout argument: wrap with cocotb.triggers.with_timeout().
+wait_idle() takes an optional timeout; get_transaction() does not: wrap it
+with cocotb.triggers.with_timeout().
 
 The library must be the same file the simulator loads with -sv_lib. Point
 AXIS_DPI_LIB at it (the Makefile does), or pass lib_path=.
@@ -36,7 +37,7 @@ import os
 from collections import namedtuple
 from ctypes import POINTER, byref, c_char_p, c_int, c_void_p
 
-from cocotb.triggers import ReadOnly, ReadWrite, Timer
+from cocotb.triggers import ReadOnly, ReadWrite, Timer, with_timeout
 
 MAX_TDATA_BITS = 4096          # = AXIS_VEC_BITS in axis_vip_dpi.sv
 _BP_MODES = {"none": 0, "osc": 1, "random": 2, "stall": 3}   # = axis_dpi.cpp
@@ -311,10 +312,28 @@ class AXIS_MASTER_VIP(_AxisVip):
         """Transfers put but not yet fully sent by the VIP."""
         return int(self._status.value)
 
-    async def wait_idle(self):
+    async def wait_idle(self, timeout=-1, unit="ns"):
         """Wait until the VIP has put everything queued so far on the bus.
-        Do not use while the sink is stalled."""
+        Do not use while the sink is stalled.
+
+        timeout : simulation time to wait at most, in `unit`. A negative
+                  value (the default) waits forever.
+        unit    : time unit of `timeout` ("fs" ... "sec", "step").
+        Raises TimeoutError (cocotb's SimTimeoutError) if transfers are still
+        outstanding when the timeout expires; they stay queued.
+        """
         self._verify()
+        if timeout <= 0:
+            await self._wait_idle()
+            return
+        try:
+            await with_timeout(self._wait_idle(), timeout, unit)
+        except TimeoutError:
+            self._log.debug("wait_idle: timeout, %d outstanding",
+                            self.outstanding)
+            raise
+
+    async def _wait_idle(self):
         # `outstanding` is updated in the NBA region: let a put_transaction()
         # from this same time step show up first.
         await ReadOnly()

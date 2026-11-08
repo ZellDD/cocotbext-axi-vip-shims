@@ -389,6 +389,28 @@ async def test_wait_idle(dut):
     assert len(await rx_n(slv, 16)) == 16
 
 
+
+@cocotb.test()
+async def test_wait_idle_timeout(dut):
+    """wait_idle(timeout=...) raises TimeoutError while the sink is stalled;
+    the transfers stay queued and arrive once it is released."""
+    mst, slv, bus = await setup(dut)
+    await mst.wait_idle(timeout=1, unit="us")                    # idle already
+    slv.stall()
+    for i in range(4):
+        mst.put_transaction(tdata=i, tlast=True)
+    try:
+        await mst.wait_idle(timeout=500, unit="ns")
+    except TimeoutError:
+        pass
+    else:
+        assert False, "wait_idle() did not time out"
+    assert mst.outstanding > 0
+    slv.release()
+    await mst.wait_idle(timeout=100, unit="us")
+    assert mst.outstanding == 0
+    assert [t.tdata for t in await rx_n(slv, 4)] == list(range(4))
+
 # ----------------------------------------------------------- API checking
 @cocotb.test()
 async def test_signature_checker(dut):

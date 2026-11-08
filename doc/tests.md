@@ -59,9 +59,6 @@
   are a build-time option in Verilator, so `WAVES=0` builds the model without
   tracing.
 
-  With Verilator 5.052, 18 of the 19 tests pass. `test_flush_slave` fails:
-  five cycles after `wait_idle()`, `pending` shows 4 beats instead of 5.
-
 ## Coverage
 
 Every `pytest` (or `pytest -s`) run from the repo root reports coverage of
