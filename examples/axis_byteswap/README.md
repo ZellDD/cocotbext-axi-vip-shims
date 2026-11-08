@@ -46,13 +46,13 @@ TESTCASE=test_partial_last_beat WAVES=1 pytest
 ```
 
 On the first run, the runner builds `libaxis_dpi.so` with CMake, generates the
-VIP cores with Vivado into `build/ip/`, then builds the simulation and runs all
+VIP cores with Vivado into the build directory, then builds the simulation and runs all
 cocotb tests in a single simulation.
 
 ## Coverage
 
 Every `pytest` (or `pytest -s`) run measures code coverage of the DUT
-(`rtl/`) and prints a summary at the end. `DUT_COVERAGE=0` turns it off.
+and prints a summary at the end. `DUT_COVERAGE=0` turns it off.
 `python3 tests/test_byteswap_runner.py` runs without coverage. (Not `COVERAGE`: cocotb reads that
 one as its own switch for coverage of the Python test code.)
 
@@ -66,10 +66,10 @@ Annotation Summary:
 |---|---|---|
 | Measured | line, branch, toggle (`--coverage`) | statement, branch, condition, expression, FSM, toggle (`+cover=bcesft`) |
 | Only the DUT, by | a generated `coverage.vlt` with `coverage_off` for every other source | `+cover=bcesft+axis_byteswap` (the DUT's module name) |
-| Raw data | `build/sim_verilator/coverage.dat` | `build/sim_questa/coverage/coverage.ucdb` |
-| Report | `coverage/annotated/` (annotated source), `coverage/coverage.info` (lcov, e.g. for `genhtml`) | `coverage/html/` |
+| Raw data | `coverage.dat` | `coverage.ucdb` |
+| Report | annotated source, `coverage.info` (lcov, e.g. for `genhtml`) | HTML |
 
-The report goes to `build/sim_<SIM>/coverage/`, together with `summary.txt`,
+Both go into the simulator's build directory, together with a `summary.txt`,
 which [conftest.py](conftest.py) prints under pytest. The Questa report counts
 code coverage only (`vcover report -code bcesft`). If it didn't, the VIP's
 protocol-checker assertions would be in the total as well.
@@ -93,14 +93,13 @@ Then point the example at it. In `CMakeLists.txt`, change the
 set `AXI_VIP_SHIMS_DIR` (or change its default). Inside this repo, both default
 to the repo root, two levels up.
 
-You use three files from the shims, all under
-`src/axi_vip_shims/axi_stream_vip_shim/`:
+You use three files from the AXI4-Stream shim:
 
 | File | Used by | How |
 |------|---------|-----|
-| `CMakeLists.txt` (via `src/CMakeLists.txt`) | CMake | `add_subdirectory` builds `libaxis_dpi.so` |
-| `src/hdl/axis_vip_dpi.sv` | simulator | compiled with your bench, after the VIP sources |
-| `src/cocotb_api/axis_vip_dpi.py` | cocotb | put its directory on the Python path |
+| [CMakeLists.txt](../../src/axi_vip_shims/axi_stream_vip_shim/CMakeLists.txt) (via the shims' top-level CMake file) | CMake | `add_subdirectory` builds `libaxis_dpi.so` |
+| [axis_vip_dpi.sv](../../src/axi_vip_shims/axi_stream_vip_shim/src/hdl/axis_vip_dpi.sv) | simulator | compiled with your bench, after the VIP sources |
+| [axis_vip_dpi.py](../../src/axi_vip_shims/axi_stream_vip_shim/src/cocotb_api/axis_vip_dpi.py) | cocotb | put its directory on the Python path |
 
 ### 2. Build the DPI library from your CMake
 
@@ -111,7 +110,7 @@ add_subdirectory("${AXI_VIP_SHIMS_DIR}/src" axi_vip_shims)
 ```
 
 Set them as cache entries *before* `add_subdirectory`. If you don't, the
-library lands in the shims checkout's `lib/`, and the mock-simulator test
+library lands in the shims checkout's library directory, and the mock-simulator test
 library is built as well.
 
 ### 3. The test bench
@@ -151,11 +150,11 @@ component (and likewise for slaves).
 See `build()` and `run()` in
 [test_byteswap_runner.py](tests/test_byteswap_runner.py):
 
-1. Xilinx VIP library from `$XILINX_VIVADO/data/xilinx_vip/hdl/`:
+1. The Xilinx VIP library that ships with Vivado:
    `axi4stream_vip_axi4streampc.sv`, `xil_common_vip_pkg.sv`,
    `axi4stream_vip_pkg.sv`, `axi4stream_vip_if.sv`, with
-   `data/xilinx_vip/include` as the include dir.
-2. The VIP top `data/ip/xilinx/axi4stream_vip_v1_1*/hdl/axi4stream_vip_v1_1_vl_rfs.sv`.
+   the library's include directory.
+2. The AXI4-Stream VIP top (`axi4stream_vip_*_vl_rfs.sv`) from Vivado's IP repository.
 3. Your generated cores, each `_pkg.sv` before its wrapper (skip `_stub.sv`).
 4. `axis_vip_dpi.sv`, then your DUT and bench.
 
@@ -183,7 +182,7 @@ sink = AXIS_SLAVE_VIP("sink", dut.sink_shim, **IFACE)
 ```
 
 The cocotb runner passes its own `sys.path` to the simulator as `PYTHONPATH`.
-So add the shims' `src/cocotb_api` directory and your test directory to `sys.path`
+So add the directory of `axis_vip_dpi.py` and your test directory to `sys.path`
 before you call `runner.test()`; setting `PYTHONPATH` in `extra_env` gets
 overwritten.
 

@@ -8,8 +8,8 @@ uses the same sources, include dirs, defines and timescale as the Questa flow,
 with these differences:
 
 - **The DPI library is linked, not loaded.** Verilator resolves DPI imports
-  when the model is linked, so `lib/libaxis_dpi.so` goes on the Verilator
-  command line, with an rpath to `lib/`. cocotb then opens the same file
+  when the model is linked, so `libaxis_dpi.so` goes on the Verilator
+  command line, with an rpath to its directory. cocotb then opens the same file
   through `AXIS_DPI_LIB` and gets the copy that is already loaded, so both
   sides still share one instance table. Rebuild the model after rebuilding
   the library.
@@ -17,8 +17,8 @@ with these differences:
   `axi4stream_vip_axi4streampc.sv` crashes Verilator as shipped: its
   `tri0`/`tri1` input ports, on an interface nested in the parameterized
   `axi4stream_vip_if` and fed from tri-stated nets, cause an internal fault.
-  At build time the flow writes a copy to
-  `build/sim_build_verilator/patched_vip/` with those 6 ports declared as
+  At build time the flow writes a copy into the model's build directory,
+  with those 6 ports declared as
   `wire` and compiles that copy instead. The pull-up/pull-down only matters for
   an undriven input, and the VIP top drives all of them. Every check is left as
   it is, and line numbers in checker messages match the original file.

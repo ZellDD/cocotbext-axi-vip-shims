@@ -3,7 +3,7 @@
 [← README](../README.md)
 
 - **Simulator-free** ([test_c_side.py](../test/axi_vip_shims/axi_stream_vip_shims/python/test_c_side.py)):
-  loads `lib/libaxis_dpi_test.so` (`axis_dpi.cpp` linked with a mock of the
+  loads the test build of the DPI library (`axis_dpi.cpp` linked with a mock of the
   simulator and SV side), then checks the C trampoline, scope handling, vector
   packing and the Python API. Build the library with CMake first. The test
   needs cocotb importable, but no simulator.
@@ -22,18 +22,16 @@
   detection. A monitor on the bus wires checks delays and backpressure by the
   cycle. The tests are started by
   [test_axis_vip_questa_runner.py](../test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_questa_runner.py),
-  which generates the VIP cores into `build/ip/` on first run:
+  which generates the VIP cores into the build directory on first run:
 
   ```sh
   python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_questa_runner.py
   ```
 
   It finds Vivado through `XILINX_VIVADO` or `vivado` on `PATH`. Each cocotb
-  test runs in its own `vsim`, with its log in
-  `artifacts/test_axis_vip_questa_runner/logs/<test>.log` and all signals recorded
-  to `artifacts/test_axis_vip_questa_runner/wlf/<test>.wlf` (see
-  [Test artifacts](#test-artifacts)). Open a waveform with
-  `vsim -view <path>/wlf/test_tdata.wlf`. Set `WAVES=0` to
+  test runs in its own `vsim`. Its log and a waveform of all signals go to
+  the runner's artifacts directory (see [Test artifacts](#test-artifacts)).
+  Open a waveform with `vsim -view <test>.wlf`. Set `WAVES=0` to
   skip recording, `GUI=1` to open the GUI, or `TESTCASE=<name>` to run one
   test. `./install.sh` builds everything and runs the simulator-free test,
   plus the simulation tests of each simulator (Questa, Verilator) that is on
@@ -41,10 +39,10 @@
 
 - **Full simulation on Verilator**
   ([test_axis_vip_verilator_runner.py](../test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py)):
-  the same tests and VIP sources, built into one Verilator model under
-  `build/sim_build_verilator_cov/` under pytest (instrumented for
-  [Coverage](#coverage)), or `build/sim_build_verilator/` when run as a
-  script, with `EXT_SHIMS_COVERAGE=0`, and for the benchmark:
+  the same tests and VIP sources, built into one Verilator model. Under
+  pytest the model is instrumented for [Coverage](#coverage). Run as a
+  script, with `EXT_SHIMS_COVERAGE=0`, or for the benchmark, a separate
+  uninstrumented model is built:
 
   ```sh
   python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_vip_verilator_runner.py
@@ -52,9 +50,8 @@
   ```
 
   Under pytest it is skipped when `verilator` is not on `PATH`. Each cocotb
-  test runs in its own model run. Logs go to
-  `artifacts/test_axis_vip_verilator_runner/logs/<test>.log` and waveforms
-  to `.../vcd/<test>.vcd` (view with GTKWave or Surfer). `WAVES=0`, `GUI=1` (opens GTKWave after one
+  test runs in its own model run. Logs and VCD waveforms go to the runner's
+  artifacts directory (view waveforms with GTKWave or Surfer). `WAVES=0`, `GUI=1` (opens GTKWave after one
   run of all selected tests) and `TESTCASE=<a>,<b>` work as on Questa. Waves
   are a build-time option in Verilator, so `WAVES=0` builds the model without
   tracing.
@@ -67,11 +64,15 @@ out.
 
 | Layer | Measured with | Where it runs | Report |
 |-------|---------------|---------------|--------|
-| Python `axis_vip_dpi.py` | pytest-cov ([pytest.ini](../pytest.ini), [.coveragerc](../.coveragerc)) in-process; cocotb's own coverage (`COCOTB_USER_COVERAGE`) inside the simulator; combined | `test_c_side.py`, functional simulation tests | `artifacts/coverage/python/` |
-| C `axis_dpi.cpp` | gcov + gcovr: `libaxis_dpi_test.so` in-process, `libaxis_dpi_cov.so` in the simulator; combined | both | `artifacts/coverage/c/` |
-| SV `axis_vip_dpi.sv`, `tb_top.sv` | Verilator `--coverage-line --coverage-expr`; Questa `+cover=bcse` | functional simulation tests | `artifacts/coverage/sv_verilator/`, `artifacts/coverage/sv_questa/` |
+| Python `axis_vip_dpi.py` | pytest-cov ([pytest.ini](../pytest.ini), [.coveragerc](../.coveragerc)) in-process; cocotb's own coverage (`COCOTB_USER_COVERAGE`) inside the simulator; combined | `test_c_side.py`, functional simulation tests | HTML, Cobertura XML |
+| C `axis_dpi.cpp` | gcov + gcovr: `libaxis_dpi_test.so` in-process, `libaxis_dpi_cov.so` in the simulator; combined | both | HTML, Cobertura XML |
+| SV `axis_vip_dpi.sv`, `tb_top.sv` | Verilator `--coverage-line --coverage-expr`; Questa `+cover=bcse` | functional simulation tests | Verilator: annotated source, lcov; Questa: HTML |
 
-- Each simulation run saves its SV data into `build/coverage/raw/<sim>/<test>`.
+The reports go to the coverage directory among the
+[Test artifacts](#test-artifacts), one subdirectory per layer and simulator.
+
+- Each simulation run saves its SV data in the build directory, one set per
+  simulator and test.
   At the end, the runs are merged (`verilator_coverage --write`,
   `vcover merge`) and reported. Verilator gives an annotated source and an
   lcov `coverage.info`; Questa gives an HTML report.
@@ -89,11 +90,11 @@ out.
   session starts. `EXT_SHIMS_COVERAGE=0` turns coverage off under pytest too.
   The switch isn't called `COVERAGE`, because cocotb reads that name as a
   (deprecated) switch for its own coverage.
-- The Python and C reports are also written as Cobertura XML
-  (`artifacts/coverage/{python,c}/coverage.xml`), for tools such as Codecov or an
+- The Python and C reports are also written as Cobertura XML, for tools such
+  as Codecov or an
   IDE coverage view.
 
-CI uploads the whole `artifacts/` directory (see
+CI uploads the whole artifacts directory (see
 [Test artifacts](#test-artifacts)) once per job, coverage included:
 `unit-py<version>-artifacts` (Python and C, simulator-free) and
 `verilator-artifacts` (all three layers, with that job's logs and JUnit XML).
@@ -105,8 +106,8 @@ For HDL coverage of your own DUT, see the
 
 ## Test artifacts
 
-Everything a test run produces for people to look at goes under
-`test/axi_vip_shims/axi_stream_vip_shims/artifacts/`, so CI uploads that one
+Everything a test run produces for people to look at goes into one
+artifacts directory next to the test sources, so CI uploads that one
 directory. Each runner writes into its own directory, named after the runner
 script, and only what applies to it. The coverage reports sit next to them:
 
@@ -121,15 +122,14 @@ artifacts/
 ```
 
 - `build.log` is the log of the build this run used. The Questa runners share
-  one build in `build/sim_build_questa/`, so the same log can show up in two
-  directories. The Verilator runners build into `build/sim_build_verilator_cov/`
-  (functional tests under pytest, with coverage) and `build/sim_build_verilator/`
-  (benchmark, script runs, or `EXT_SHIMS_COVERAGE=0`).
+  one build, so the same log can show up in two directories. The Verilator
+  runners use two builds: an instrumented one (functional tests under pytest)
+  and a plain one (benchmark, script runs, or `EXT_SHIMS_COVERAGE=0`).
 - `results/` holds each benchmark case's `<test>.json` while the runner
   collects it into `benchmark.txt`.
 - `coverage/` holds the reports from the last `pytest` run (see
-  [Coverage](#coverage)). The raw data they're made from stays in
-  `build/coverage/` and `build/.coverage`.
+  [Coverage](#coverage)). The raw data they're made from stays in the
+  build directory.
 
 The whole tree is generated and ignored by git; `make clean` empties it.
 
@@ -186,8 +186,7 @@ BENCH_REPEATS=5 python3 .../test_axis_benchmark_runner.py     # runs per case (d
 ```
 
 Every run of every case is a fresh `vsim`. The table, with the median wall
-time and the spread across runs, goes to
-`artifacts/test_axis_benchmark_runner/benchmark.txt`.
+time and the spread across runs, goes to `benchmark.txt` in the runner's artifacts directory.
 cocotbext-axi's per-frame INFO logging is switched off during the benchmark,
 because the shims log nothing per beat.
 
@@ -209,8 +208,7 @@ comparison of the two setups and not a measure of the shims' own overhead.
 The same benchmark runs on Verilator through
 [test_axis_benchmark_verilator_runner.py](../test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py).
 It takes the same `BENCH_BEATS` / `BENCH_REPEATS`, always builds without
-waves, and writes its table to
-`artifacts/test_axis_benchmark_verilator_runner/benchmark.txt`:
+waves, and writes its table to `benchmark.txt` in its own artifacts directory:
 
 ```sh
 python3 test/axi_vip_shims/axi_stream_vip_shims/python/test_axis_benchmark_verilator_runner.py

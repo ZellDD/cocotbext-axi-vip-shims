@@ -172,7 +172,7 @@ The two test libraries are built with `--coverage`. Turn that off with
 leave out both test libraries with `-DAXI_VIP_SHIMS_BUILD_TEST_LIBS=OFF`.
 `libaxis_dpi.so` is never instrumented.
 
-All of them land in the top-level `lib/` (set by `AXI_VIP_SHIMS_LIB_DIR`).
+All of them land in the repo's library directory (set by `AXI_VIP_SHIMS_LIB_DIR`).
 
 The library is deliberately linked **without** `-Wl,--no-undefined`.
 `svGetScope` / `svSetScope` and the SV exports are resolved by the simulator at
